@@ -1,6 +1,12 @@
 """
-CLI Entrypoint for Training & Evaluating the PyTorch Deep Transformer & Diffusion Pipeline
-Optimized for GPU acceleration (CUDA), mixed precision, and multi-horizon validation.
+CLI Entrypoint for Deep Multi-Task Hybrid Architecture (BiLSTM-GRU-MHSA + Heads + Diffusion)
+Implements:
+- Full GPU CUDA Acceleration with pin_memory and non-blocking streaming
+- Time2Vec and Dynamic PRN Entity Embeddings
+- Probabilistic Gaussian Parameter Regression Head with Gaussian NLL
+- Supervised Binary Event Classifier with BCE
+- 100-step Conditional DDPM Diffusion Denoiser
+- Multi-Horizon Metrics & Diagnostic Plots
 """
 
 import argparse
@@ -12,7 +18,6 @@ from tqdm import tqdm
 
 from src.config import (
     DEFAULT_DATA_PATH,
-    DEFAULT_OUTPUT_DIR,
     SEQ_LEN,
     FORECAST_HORIZON,
     TARGET_COLS_4,
@@ -23,16 +28,9 @@ from src.config import (
 )
 from src.data import prepare_pytorch_datasets
 from src.models.pytorch_transformer import GNSSForecaster
-from src.models.pytorch_diffusion import (
-    DiffusionSchedule,
-    ConditionalDiffusionDenoiser,
-    sample_diffusion_forecast
-)
+from src.models.pytorch_diffusion import ConditionalDiffusionDenoiser, DiffusionSchedule, sample_diffusion_forecast
 from src.models.losses import composite_transformer_loss, diffusion_mse_loss
-from src.evaluate import (
-    compute_tensor_horizon_metrics,
-    save_metrics_summary
-)
+from src.evaluate import compute_tensor_horizon_metrics, save_metrics_summary
 from src.visualize import (
     plot_training_history,
     plot_multihorizon_heatmap,
@@ -43,62 +41,82 @@ from src.visualize import (
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train PyTorch Deep Transformer & Diffusion GNSS Forecaster (GPU & CPU)")
+    parser = argparse.ArgumentParser(description="Train Deep Hybrid Sequence Forecaster with DDPM")
     parser.add_argument("--data", default=DEFAULT_DATA_PATH, help="Path to CSV dataset")
     parser.add_argument("--output", default="./transformer_results", help="Directory to save artifacts")
-    parser.add_argument("--epochs", type=int, default=TRANSFORMER_DEFAULTS["epochs"], help="Transformer training epochs")
-    parser.add_argument("--diffusion-epochs", type=int, default=DIFFUSION_DEFAULTS["epochs"], help="Diffusion training epochs")
-    parser.add_argument("--batch-size", type=int, default=TRANSFORMER_DEFAULTS["batch_size"], help="Batch size")
-    parser.add_argument("--lr", type=float, default=TRANSFORMER_DEFAULTS["learning_rate"], help="Transformer learning rate")
-    parser.add_argument("--d-model", type=int, default=TRANSFORMER_DEFAULTS["d_model"], help="Transformer latent dimension")
-    parser.add_argument("--nhead", type=int, default=TRANSFORMER_DEFAULTS["nhead"], help="Number of attention heads")
-    parser.add_argument("--num-layers", type=int, default=TRANSFORMER_DEFAULTS["num_layers"], help="Transformer encoder layers")
-    parser.add_argument("--enable-diffusion", action="store_true", help="Enable training of conditional diffusion model")
-    parser.add_argument("--device", default="auto", help="Target device: 'cuda', 'cuda:0', 'cpu', or 'auto'")
+    parser.add_argument("--epochs", type=int, default=25, help="Transformer training epochs")
+    parser.add_argument("--diffusion-epochs", type=int, default=20, help="Diffusion training epochs")
+    parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
+    parser.add_argument("--lr", type=float, default=1.5e-3, help="Learning rate")
+    parser.add_argument("--d-model", type=int, default=64, help="Model hidden dimension")
+    parser.add_argument("--bilstm-units", type=int, default=48, help="BiLSTM hidden units")
+    parser.add_argument("--gru-units", type=int, default=48, help="GRU hidden units")
+    parser.add_argument("--nhead", type=int, default=4, help="Multi-Head Attention heads")
+    parser.add_argument("--num-layers", type=int, default=3, help="Transformer encoder layers")
+    parser.add_argument("--enable-diffusion", action="store_true", help="Train conditional DDPM module")
+    parser.add_argument("--device", default="auto", help="Device ('cuda', 'cuda:0', 'cpu', or 'auto')")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     return parser.parse_args()
 
 
 def train_one_epoch(model, loader, optimizer, device):
     model.train()
-    total_epoch_loss = 0.0
-    for x, y, sat, spike_targets in tqdm(loader, desc="Train Epoch", leave=False):
+    total_loss = 0.0
+
+    for x, y, sat, spikes in tqdm(loader, desc="Train Epoch", leave=False):
         x = x.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
         sat = sat.to(device, non_blocking=True)
-        spike_targets = spike_targets.to(device, non_blocking=True)
+        spikes = spikes.to(device, non_blocking=True)
 
         optimizer.zero_grad()
         mu, sigma, spike_probs, _ = model(x, sat)
-        loss = composite_transformer_loss(mu, sigma, spike_probs, y, spike_targets)
-        loss.backward()
 
+        loss = composite_transformer_loss(
+            mu=mu,
+            sigma=sigma,
+            spike_probs=spike_probs,
+            targets=y,
+            spike_targets=spikes
+        )
+
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-        total_epoch_loss += loss.item()
-
-    return total_epoch_loss / len(loader)
-
-
-@torch.no_grad()
-def validate_epoch(model, loader, device):
-    model.eval()
-    total_loss, sigmas, spikes = 0.0, [], []
-
-    for x, y, sat, spike_targets in loader:
-        x = x.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
-        sat = sat.to(device, non_blocking=True)
-        spike_targets = spike_targets.to(device, non_blocking=True)
-
-        mu, sigma, spike_probs, _ = model(x, sat)
-        loss = composite_transformer_loss(mu, sigma, spike_probs, y, spike_targets)
 
         total_loss += loss.item()
-        sigmas.append(sigma.mean().item())
-        spikes.append(spike_probs.mean().item())
 
-    return total_loss / len(loader), np.mean(sigmas), np.mean(spikes)
+    return total_loss / len(loader)
+
+
+def validate_epoch(model, loader, device):
+    model.eval()
+    total_loss = 0.0
+    sigmas = []
+    spikes = []
+
+    with torch.no_grad():
+        for x, y, sat, spike_targets in loader:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+            sat = sat.to(device, non_blocking=True)
+            spike_targets = spike_targets.to(device, non_blocking=True)
+
+            mu, sigma, spike_probs, _ = model(x, sat)
+
+            loss = composite_transformer_loss(
+                mu=mu,
+                sigma=sigma,
+                spike_probs=spike_probs,
+                targets=y,
+                spike_targets=spike_targets
+            )
+
+            total_loss += loss.item()
+            sigmas.append(sigma.mean().item())
+            spikes.append(spike_probs.mean().item())
+
+    return total_loss / len(loader), float(np.mean(sigmas)), float(np.mean(spikes))
 
 
 def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimizer, device):
@@ -165,15 +183,16 @@ def run_training():
     test_loader = data_bundle["test_loader"]
     target_scaler = data_bundle["target_scaler"]
 
-    # 2. Build Transformer Forecaster
+    # 2. Build Deep Multi-Task Hybrid Forecaster
     model = GNSSForecaster(
         num_features=data_bundle["num_features"],
         num_satellites=data_bundle["num_satellites"],
         d_model=args.d_model,
-        forecast_horizon=FORECAST_HORIZON,
-        output_dim=data_bundle["output_dim"],
+        bilstm_units=args.bilstm_units,
+        gru_units=args.gru_units,
         nhead=args.nhead,
-        num_layers=args.num_layers
+        forecast_horizon=FORECAST_HORIZON,
+        output_dim=data_bundle["output_dim"]
     ).to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=TRANSFORMER_DEFAULTS["weight_decay"])
@@ -181,7 +200,7 @@ def run_training():
 
     train_losses, val_losses, sigma_means, spike_means = [], [], [], []
 
-    print(f"\nTraining GNSS Transformer Forecaster ({args.epochs} epochs on {device})...")
+    print(f"\nTraining Hybrid Sequence Forecaster ({args.epochs} epochs on {device})...")
     for epoch in range(args.epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         val_loss, sigma_mean, spike_mean = validate_epoch(model, val_loader, device)
@@ -195,9 +214,9 @@ def run_training():
         print(f"Epoch {epoch+1:02d}/{args.epochs:02d} | Train Loss: {train_loss:.5f} | Val Loss: {val_loss:.5f} | Sigma: {sigma_mean:.4f} | Spike: {spike_mean:.4f}")
 
     # Save Model Weights
-    transformer_ckpt = os.path.join(args.output, "gnss_transformer.pt")
+    transformer_ckpt = os.path.join(args.output, "gnss_hybrid_forecaster.pt")
     torch.save(model.state_dict(), transformer_ckpt)
-    print(f"\nTransformer Checkpoint Saved -> {transformer_ckpt}")
+    print(f"\nHybrid Forecaster Checkpoint Saved -> {transformer_ckpt}")
 
     # 3. Optional Diffusion Training
     diffusion_model = None
@@ -211,6 +230,7 @@ def run_training():
             device=device
         )
         diffusion_model = ConditionalDiffusionDenoiser(
+            context_dim=model.backbone.context_dim,
             d_model=args.d_model,
             output_dim=data_bundle["output_dim"]
         ).to(device)
@@ -227,7 +247,7 @@ def run_training():
         print(f"Diffusion Checkpoint Saved -> {diffusion_ckpt}")
 
     # 4. Evaluation on Test Set
-    print("\nRunning Evaluation on Test Set...")
+    print("\nRunning Evaluation on Out-of-Sample Test Set...")
     model.eval()
     mu_list, sigma_list, target_list = [], [], []
 
@@ -263,17 +283,17 @@ def run_training():
 
     save_metrics_summary(
         filepath=os.path.join(args.output, "transformer_metrics_summary.json"),
-        model_name="Deep Multi-Task GNSS Transformer",
+        model_name="Deep Multi-Task Hybrid Forecaster (BiLSTM-GRU-MHSA + DDPM)",
         aggregate=aggregate,
         horizon_results=horizon_metrics
     )
 
     # 5. Diagnostic Plots
-    print("\nGenerating Diagnostic Visualizations...")
+    print("\nGenerating Publication Diagnostic Visualizations...")
     plot_training_history(
         {"loss": train_losses, "val_loss": val_losses, "sigma_mean": sigma_means, "spike_mean": spike_means},
         os.path.join(args.output, "01_transformer_training_history.png"),
-        title="Transformer Training History"
+        title="Hybrid Sequence Model Training History"
     )
     plot_multihorizon_heatmap(horizon_metrics, TARGET_COLS_4, os.path.join(args.output, "02_multihorizon_mae_heatmap.png"))
     plot_probabilistic_uncertainty(target_real[0], mu_real[0], sigma_real[0], os.path.join(args.output, "03_probabilistic_uncertainty.png"))
@@ -295,7 +315,7 @@ def run_training():
 
         plot_diffusion_samples(target_real[0], diff_samples, os.path.join(args.output, "05_diffusion_samples.png"))
 
-    print(f"\nTransformer & Diffusion Pipeline Complete! Artifacts saved to: {args.output}")
+    print(f"\nHybrid Pipeline Complete! All artifacts saved to: {args.output}")
 
 
 if __name__ == "__main__":

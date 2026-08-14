@@ -1,5 +1,6 @@
 """
-Conditional Diffusion Model for Stochastic Refinement and Multi-Trajectory Generation
+Conditional Denoising Diffusion Probabilistic Model (DDPM) for Satellite Trajectories
+Conditioned on Global Hybrid Context: c = [h_GRU; MHSA(H); E_PRN]
 """
 
 import torch
@@ -11,7 +12,7 @@ from src.config import DIFFUSION_DEFAULTS, TARGET_COLS_4
 
 class DiffusionSchedule:
     """
-    Linear beta schedule and alpha variance components for discrete diffusion.
+    Linear beta schedule and alpha variance components for discrete 100-step diffusion.
     """
     def __init__(
         self,
@@ -47,10 +48,11 @@ class DiffusionTimeEmbedding(nn.Module):
 
 class ConditionalDiffusionDenoiser(nn.Module):
     """
-    Transformer-based denoiser conditioned on global context and diffusion timestep.
+    Transformer-based denoiser conditioned on global hybrid context c and diffusion timestep t.
     """
     def __init__(
         self,
+        context_dim: int = 109,
         d_model: int = 64,
         output_dim: int = len(TARGET_COLS_4),
         num_layers: int = 2,
@@ -58,6 +60,7 @@ class ConditionalDiffusionDenoiser(nn.Module):
     ):
         super().__init__()
         self.time_embedding = DiffusionTimeEmbedding(d_model=d_model)
+        self.context_projection = nn.Linear(context_dim, d_model)
         self.input_projection = nn.Linear(output_dim, d_model)
         self.positional_encoding = PositionalEncoding(d_model)
 
@@ -72,7 +75,8 @@ class ConditionalDiffusionDenoiser(nn.Module):
     def forward(self, noisy_future: torch.Tensor, context: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         x = self.input_projection(noisy_future)
         t_embed = self.time_embedding(t).unsqueeze(1)
-        x = x + t_embed + context.unsqueeze(1)
+        c_embed = self.context_projection(context).unsqueeze(1)
+        x = x + t_embed + c_embed
         x = self.positional_encoding(x)
         x = self.transformer(x)
         predicted_noise = self.output_projection(x)
@@ -86,19 +90,20 @@ def sample_diffusion_forecast(
     context: torch.Tensor,
     mu: torch.Tensor,
     shape: tuple,
-    noise_scale: float = 0.03,
+    noise_scale: float = 0.02,
     device: str = "cpu"
 ) -> torch.Tensor:
     """
-    Generates refined multi-step forecasts via reverse diffusion process.
+    Generates refined multi-step forecasts via 100-step reverse diffusion process.
     """
     diffusion_model.eval()
+    # Start from white noise around base mean
     noise = torch.randn(shape, device=device)
-    x = mu + noise_scale * noise
+    x = noise_scale * noise
 
     for step in reversed(range(schedule.steps)):
         t = torch.full((shape[0],), step, device=device, dtype=torch.long)
-        predicted_noise = diffusion_model(x, context, t)
+        predicted_noise = diffusion_model(mu + x, context, t)
 
         alpha = schedule.alphas[step]
         alpha_bar = schedule.alpha_bars[step]
@@ -110,6 +115,6 @@ def sample_diffusion_forecast(
 
         if step > 0:
             extra_noise = torch.randn_like(x)
-            x = x + torch.sqrt(beta) * 0.1 * extra_noise
+            x = x + torch.sqrt(beta) * 0.05 * extra_noise
 
     return mu + x
