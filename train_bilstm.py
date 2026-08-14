@@ -1,6 +1,6 @@
 """
 CLI Entrypoint for Training & Evaluating the Multi-Horizon BiLSTM + GRU Model
-Supports both TensorFlow/Keras and PyTorch backends seamlessly.
+Supports GPU (CUDA) and CPU with both TensorFlow/Keras and PyTorch backends.
 """
 
 import argparse
@@ -33,7 +33,7 @@ from src.visualize import (
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train BiLSTM + GRU GNSS Ephemeris & Clock Forecaster")
+    parser = argparse.ArgumentParser(description="Train BiLSTM + GRU GNSS Ephemeris & Clock Forecaster (GPU & CPU)")
     parser.add_argument("--data", default=DEFAULT_DATA_PATH, help="Path to CSV dataset")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_DIR, help="Directory to save artifacts")
     parser.add_argument("--epochs", type=int, default=KERAS_DEFAULTS["epochs"], help="Number of training epochs")
@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument("--dropout-1", type=float, default=KERAS_DEFAULTS["dropout_1"], help="Dropout 1 rate")
     parser.add_argument("--dropout-2", type=float, default=KERAS_DEFAULTS["dropout_2"], help="Dropout 2 rate")
     parser.add_argument("--backend", choices=["auto", "keras", "torch"], default="auto", help="Deep learning backend")
+    parser.add_argument("--device", default="auto", help="Target device: 'cuda', 'cuda:0', 'cpu', or 'auto'")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     return parser.parse_args()
 
@@ -54,6 +55,14 @@ def train_keras(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
     from src.models.keras_bilstm import build_bilstm_gru_model
 
     tf.random.set_seed(args.seed)
+
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        print(f"  TensorFlow Active GPU(s): {[gpu.name for gpu in gpus]}")
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    else:
+        print("  TensorFlow running on CPU")
 
     X_train, y_train, X_val, y_val = build_keras_sequences(
         train_df_scaled, complete_sats, seq_len=SEQ_LEN, horizon=FORECAST_HORIZON, target_cols=TARGET_COLS_5, seed=args.seed
@@ -112,8 +121,22 @@ def train_pytorch(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
     from torch.utils.data import TensorDataset, DataLoader
     from src.models.pytorch_bilstm import BiLSTMGRUPyTorchModel
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device == "auto":
+        device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device_str = args.device
+
+    device = torch.device(device_str)
     torch.manual_seed(args.seed)
+
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.benchmark = True
+        gpu_name = torch.cuda.get_device_name(device)
+        total_vram = torch.cuda.get_device_properties(device).total_memory / (1024 ** 3)
+        print(f"  Using GPU Acceleration: {gpu_name} ({total_vram:.2f} GB VRAM)")
+    else:
+        print("  Using Compute Device: CPU")
 
     X_train, y_train, X_val, y_val = build_keras_sequences(
         train_df_scaled, complete_sats, seq_len=SEQ_LEN, horizon=FORECAST_HORIZON, target_cols=TARGET_COLS_5, seed=args.seed
@@ -122,8 +145,9 @@ def train_pytorch(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
     train_ds = TensorDataset(torch.tensor(X_train, dtype=torch.float32), torch.tensor(y_train, dtype=torch.float32))
     val_ds = TensorDataset(torch.tensor(X_val, dtype=torch.float32), torch.tensor(y_val, dtype=torch.float32))
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+    pin_memory = (device.type == "cuda")
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, pin_memory=pin_memory)
 
     model = BiLSTMGRUPyTorchModel(
         seq_len=SEQ_LEN,
@@ -150,7 +174,9 @@ def train_pytorch(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
         model.train()
         train_loss, train_mae_sum = 0.0, 0.0
         for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
+            bx = bx.to(device, non_blocking=True)
+            by = by.to(device, non_blocking=True)
+
             optimizer.zero_grad()
             out = model(bx)
             loss = criterion(out, by)
@@ -167,7 +193,8 @@ def train_pytorch(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
         val_loss, val_mae_sum = 0.0, 0.0
         with torch.no_grad():
             for bx, by in val_loader:
-                bx, by = bx.to(device), by.to(device)
+                bx = bx.to(device, non_blocking=True)
+                by = by.to(device, non_blocking=True)
                 out = model(bx)
                 loss = criterion(out, by)
                 val_loss += loss.item() * len(bx)
@@ -187,7 +214,7 @@ def train_pytorch(args, train_df_scaled, test_df_scaled, complete_sats, scaler):
 
         if epoch_val_loss < best_val_loss:
             best_val_loss = epoch_val_loss
-            best_weights = model.state_dict()
+            best_weights = {k: v.cpu() for k, v in model.state_dict().items()}
             patience_counter = 0
         else:
             patience_counter += 1

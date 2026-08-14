@@ -249,9 +249,10 @@ def prepare_pytorch_datasets(
     val_ds = GNSSPyTorchDataset(X_val, Y_val, SAT_val, SPIKE_val)
     test_ds = GNSSPyTorchDataset(X_test, Y_test, SAT_test, SPIKE_test)
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+    pin_memory = torch.cuda.is_available()
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=pin_memory)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, pin_memory=pin_memory)
 
     return {
         "train_loader": train_loader,

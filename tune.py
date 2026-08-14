@@ -1,6 +1,6 @@
 """
 CLI Entrypoint for Optuna Bayesian Hyperparameter Optimization
-Supports both TensorFlow/Keras and PyTorch execution environments.
+Supports GPU (CUDA) and CPU execution environments.
 """
 
 import argparse
@@ -20,6 +20,7 @@ from src.data import load_and_clean_data, scale_datasets_keras, build_keras_sequ
 # Global data placeholders for objective function
 _X_tr, _y_tr, _X_val, _y_val = None, None, None, None
 _backend = "torch"
+_device_str = "auto"
 
 
 def objective_keras(trial: optuna.Trial) -> float:
@@ -69,7 +70,10 @@ def objective_pytorch(trial: optuna.Trial) -> float:
     from torch.utils.data import TensorDataset, DataLoader
     from src.models.pytorch_bilstm import BiLSTMGRUPyTorchModel
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if _device_str == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(_device_str)
 
     bilstm_units = trial.suggest_categorical("bilstm_units", [32, 64, 128])
     gru_units = trial.suggest_categorical("gru_units", [16, 32, 64])
@@ -81,8 +85,9 @@ def objective_pytorch(trial: optuna.Trial) -> float:
     train_ds = TensorDataset(torch.tensor(_X_tr, dtype=torch.float32), torch.tensor(_y_tr, dtype=torch.float32))
     val_ds = TensorDataset(torch.tensor(_X_val, dtype=torch.float32), torch.tensor(_y_val, dtype=torch.float32))
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    pin_memory = (device.type == "cuda")
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=pin_memory)
 
     model = BiLSTMGRUPyTorchModel(
         seq_len=SEQ_LEN,
@@ -102,7 +107,8 @@ def objective_pytorch(trial: optuna.Trial) -> float:
     for epoch in range(12):  # Fast tuning loop
         model.train()
         for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
+            bx = bx.to(device, non_blocking=True)
+            by = by.to(device, non_blocking=True)
             optimizer.zero_grad()
             out = model(bx)
             loss = criterion(out, by)
@@ -113,7 +119,8 @@ def objective_pytorch(trial: optuna.Trial) -> float:
         val_mae_sum = 0.0
         with torch.no_grad():
             for bx, by in val_loader:
-                bx, by = bx.to(device), by.to(device)
+                bx = bx.to(device, non_blocking=True)
+                by = by.to(device, non_blocking=True)
                 out = model(bx)
                 val_mae_sum += torch.mean(torch.abs(out - by)).item() * len(bx)
 
@@ -125,20 +132,23 @@ def objective_pytorch(trial: optuna.Trial) -> float:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Optuna Hyperparameter Tuning for GNSS Forecaster")
+    parser = argparse.ArgumentParser(description="Optuna Hyperparameter Tuning for GNSS Forecaster (GPU & CPU)")
     parser.add_argument("--data", default=DEFAULT_DATA_PATH, help="Path to CSV dataset")
     parser.add_argument("--n-trials", type=int, default=8, help="Number of Optuna trials")
     parser.add_argument("--backend", choices=["auto", "keras", "torch"], default="auto", help="Execution backend")
+    parser.add_argument("--device", default="auto", help="Compute device ('cuda', 'cpu', or 'auto')")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     return parser.parse_args()
 
 
 def run_tuning():
-    global _X_tr, _y_tr, _X_val, _y_val, _backend
+    global _X_tr, _y_tr, _X_val, _y_val, _backend, _device_str
     args = parse_args()
     np.random.seed(args.seed)
 
     _backend = args.backend
+    _device_str = args.device
+
     if _backend == "auto":
         try:
             import tensorflow
@@ -146,7 +156,7 @@ def run_tuning():
         except ImportError:
             _backend = "torch"
 
-    print(f"Hyperparameter Tuning Backend: {_backend.upper()}")
+    print(f"Hyperparameter Tuning Backend: {_backend.upper()} (device={_device_str})")
     print("Loading and preparing sequences for hyperparameter optimization...")
     train_df, test_df, complete_sats = load_and_clean_data(args.data)
     train_df_sc, test_df_sc, _ = scale_datasets_keras(train_df, test_df, TARGET_COLS_5)

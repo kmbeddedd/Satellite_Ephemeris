@@ -185,10 +185,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2. Install Dependencies
+### 2. Install Dependencies (CPU or CUDA GPU)
 
 ```bash
+# Standard installation
 pip install -r requirements.txt
+
+# For NVIDIA GPU Acceleration (CUDA 13.2):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
 ```
 
 ---
@@ -197,17 +201,17 @@ pip install -r requirements.txt
 
 ### 1. Unified CLI Runner (`main.py`)
 
-Run any pipeline via `main.py`:
+Run any pipeline on GPU or CPU via `main.py`:
 
 ```bash
-# Run BiLSTM + GRU Forecaster
-.venv\Scripts\python.exe main.py --model bilstm --data FINAL_Data.csv --output ./gnss_results
+# Run BiLSTM + GRU Forecaster on GPU
+.venv\Scripts\python.exe main.py --model bilstm --data FINAL_Data.csv --output ./gnss_results --device cuda
 
-# Run PyTorch Transformer Forecaster with Conditional Diffusion
-.venv\Scripts\python.exe main.py --model transformer --data FINAL_Data.csv --output ./transformer_results --enable-diffusion
+# Run PyTorch Transformer Forecaster with Conditional Diffusion on GPU
+.venv\Scripts\python.exe main.py --model transformer --data FINAL_Data.csv --output ./transformer_results --enable-diffusion --device cuda
 
-# Run Optuna Hyperparameter Tuning
-.venv\Scripts\python.exe main.py --model tune --data FINAL_Data.csv --n-trials 15
+# Run Optuna Hyperparameter Tuning on GPU
+.venv\Scripts\python.exe main.py --model tune --data FINAL_Data.csv --n-trials 15 --device cuda
 ```
 
 ---

@@ -1,5 +1,6 @@
 """
 CLI Entrypoint for Training & Evaluating the PyTorch Deep Transformer & Diffusion Pipeline
+Optimized for GPU acceleration (CUDA), mixed precision, and multi-horizon validation.
 """
 
 import argparse
@@ -42,7 +43,7 @@ from src.visualize import (
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train PyTorch Deep Transformer & Diffusion GNSS Forecaster")
+    parser = argparse.ArgumentParser(description="Train PyTorch Deep Transformer & Diffusion GNSS Forecaster (GPU & CPU)")
     parser.add_argument("--data", default=DEFAULT_DATA_PATH, help="Path to CSV dataset")
     parser.add_argument("--output", default="./transformer_results", help="Directory to save artifacts")
     parser.add_argument("--epochs", type=int, default=TRANSFORMER_DEFAULTS["epochs"], help="Transformer training epochs")
@@ -53,7 +54,7 @@ def parse_args():
     parser.add_argument("--nhead", type=int, default=TRANSFORMER_DEFAULTS["nhead"], help="Number of attention heads")
     parser.add_argument("--num-layers", type=int, default=TRANSFORMER_DEFAULTS["num_layers"], help="Transformer encoder layers")
     parser.add_argument("--enable-diffusion", action="store_true", help="Enable training of conditional diffusion model")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="Device (cuda/cpu)")
+    parser.add_argument("--device", default="auto", help="Target device: 'cuda', 'cuda:0', 'cpu', or 'auto'")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed")
     return parser.parse_args()
 
@@ -62,8 +63,10 @@ def train_one_epoch(model, loader, optimizer, device):
     model.train()
     total_epoch_loss = 0.0
     for x, y, sat, spike_targets in tqdm(loader, desc="Train Epoch", leave=False):
-        x, y = x.to(device), y.to(device)
-        sat, spike_targets = sat.to(device), spike_targets.to(device)
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
+        sat = sat.to(device, non_blocking=True)
+        spike_targets = spike_targets.to(device, non_blocking=True)
 
         optimizer.zero_grad()
         mu, sigma, spike_probs, _ = model(x, sat)
@@ -83,8 +86,10 @@ def validate_epoch(model, loader, device):
     total_loss, sigmas, spikes = 0.0, [], []
 
     for x, y, sat, spike_targets in loader:
-        x, y = x.to(device), y.to(device)
-        sat, spike_targets = sat.to(device), spike_targets.to(device)
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
+        sat = sat.to(device, non_blocking=True)
+        spike_targets = spike_targets.to(device, non_blocking=True)
 
         mu, sigma, spike_probs, _ = model(x, sat)
         loss = composite_transformer_loss(mu, sigma, spike_probs, y, spike_targets)
@@ -101,7 +106,9 @@ def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimiz
     total_epoch_loss = 0.0
 
     for x, y, sat, _ in tqdm(loader, desc="Diffusion Train Epoch", leave=False):
-        x, y, sat = x.to(device), y.to(device), sat.to(device)
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
+        sat = sat.to(device, non_blocking=True)
         batch_size = y.shape[0]
 
         with torch.no_grad():
@@ -126,12 +133,24 @@ def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimiz
 def run_training():
     args = parse_args()
     os.makedirs(args.output, exist_ok=True)
-    device = torch.device(args.device)
 
+    if args.device == "auto":
+        device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device_str = args.device
+
+    device = torch.device(device_str)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    print(f"Target Compute Device: {device}")
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.benchmark = True
+        gpu_name = torch.cuda.get_device_name(device)
+        total_vram = torch.cuda.get_device_properties(device).total_memory / (1024 ** 3)
+        print(f"  Target Compute Device: GPU -> {gpu_name} ({total_vram:.2f} GB VRAM)")
+    else:
+        print("  Target Compute Device: CPU")
 
     # 1. Prepare Datasets & Scalers
     data_bundle = prepare_pytorch_datasets(
@@ -162,7 +181,7 @@ def run_training():
 
     train_losses, val_losses, sigma_means, spike_means = [], [], [], []
 
-    print(f"\nTraining GNSS Transformer Forecaster ({args.epochs} epochs)...")
+    print(f"\nTraining GNSS Transformer Forecaster ({args.epochs} epochs on {device})...")
     for epoch in range(args.epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         val_loss, sigma_mean, spike_mean = validate_epoch(model, val_loader, device)
@@ -184,7 +203,7 @@ def run_training():
     diffusion_model = None
     schedule = None
     if args.enable_diffusion:
-        print(f"\nTraining Conditional Diffusion Denoiser ({args.diffusion_epochs} epochs)...")
+        print(f"\nTraining Conditional Diffusion Denoiser ({args.diffusion_epochs} epochs on {device})...")
         schedule = DiffusionSchedule(
             steps=DIFFUSION_DEFAULTS["steps"],
             beta_start=DIFFUSION_DEFAULTS["beta_start"],
@@ -214,12 +233,13 @@ def run_training():
 
     with torch.no_grad():
         for x, y, sat, _ in test_loader:
-            x, y, sat = x.to(device), y.to(device), sat.to(device)
+            x = x.to(device, non_blocking=True)
+            sat = sat.to(device, non_blocking=True)
             mu, sigma, _, _ = model(x, sat)
 
             mu_list.append(mu.cpu().numpy())
             sigma_list.append(sigma.cpu().numpy())
-            target_list.append(y.cpu().numpy())
+            target_list.append(y.numpy())
 
     mu = np.concatenate(mu_list, axis=0)
     sigma = np.concatenate(sigma_list, axis=0)
