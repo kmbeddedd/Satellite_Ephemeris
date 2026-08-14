@@ -14,17 +14,19 @@ An end-to-end deep learning framework for **multi-horizon forecasting of GNSS br
 
 - [Overview & Motivation](#-overview--motivation)
 - [Dataset & Problem Formulation](#-dataset--problem-formulation)
+- [Modular Python Script Architecture](#-modular-python-script-architecture)
 - [Architecture & Methodology](#-architecture--methodology)
-  - [1. Production BiLSTM + GRU Model (`gnss_forecast.py`)](#1-production-bilstm--gru-model-gnss_forecastpy)
-  - [2. Experimental Probabilistic Transformer (`Satellite_ML_...ipynb`)](#2-experimental-probabilistic-transformer)
+  - [1. Production BiLSTM + GRU Forecaster (`train_bilstm.py`)](#1-production-bilstm--gru-forecaster-train_bilstmpy)
+  - [2. Deep Transformer & Diffusion Forecaster (`train_transformer.py`)](#2-deep-transformer--diffusion-forecaster-train_transformerpy)
   - [3. Bayesian Hyperparameter Tuning (`tune.py`)](#3-bayesian-hyperparameter-tuning-tunepy)
 - [Performance & Benchmark Results](#-performance--benchmark-results)
 - [Repository Structure](#-repository-structure)
-- [Installation & Setup](#-installation--setup)
-- [Usage Guide](#-usage-guide)
-  - [Train & Evaluate Pipeline](#train--evaluate-pipeline)
-  - [Hyperparameter Optimization](#hyperparameter-optimization)
-  - [Google Colab Execution](#google-colab-execution)
+- [Installation & Virtual Environment Setup](#-installation--virtual-environment-setup)
+- [CLI Usage Guide](#-cli-usage-guide)
+  - [1. Unified CLI Runner (`main.py`)](#1-unified-cli-runner-mainpy)
+  - [2. Train BiLSTM + GRU Pipeline (`train_bilstm.py`)](#2-train-bilstm--gru-pipeline-train_bilstmpy)
+  - [3. Train Transformer & Diffusion Pipeline (`train_transformer.py`)](#3-train-transformer--diffusion-pipeline-train_transformerpy)
+  - [4. Hyperparameter Optimization (`tune.py`)](#4-hyperparameter-optimization-tunepy)
 - [Generated Visualizations & Diagnostics](#-generated-visualizations--diagnostics)
 - [License](#-license)
 
@@ -48,203 +50,218 @@ The dataset (`FINAL_Data.csv`) contains continuous 8-day satellite tracking tele
 | Parameter | Specification |
 | :--- | :--- |
 | **Observation Cadence** | 15 minutes ($96 \text{ steps/day}$) |
-| **Time Span** | 8 days (Days 1–7: Training / Validation, Day 8: Out-of-sample Test) |
+| **Time Span** | 8 days (Days 1-7: Training / Validation, Day 8: Out-of-sample Test) |
 | **Constellations** | GPS (PRNs starting with `G`) and GLONASS (PRNs starting with `R`) |
 | **Look-back Window ($L$)** | $96\text{ steps} = 24\text{ hours}$ |
 | **Forecast Horizon ($H$)** | Direct multi-step prediction of $96\text{ steps} = 24\text{ hours}$ ahead |
 
-### Target Variables (5 Targets)
+### Target Variables
 
 $$\mathbf{y}_t = \begin{bmatrix} \text{Error\_X}_t \\ \text{Error\_Y}_t \\ \text{Error\_Z}_t \\ \text{3D\_Orbit\_Error}_t \\ \text{Error\_Clock}_t \end{bmatrix}$$
 
 - **$\text{Error\_X}, \text{Error\_Y}, \text{Error\_Z}$**: ECEF orbit coordinate differences between broadcast and modelled precise ephemeris ($\text{metres}$).
-- **$\text{3D\_Orbit\_Error}$**: Total Euclidean spatial deviation ($\text{metres}$):
-  $$\text{3D\_Orbit\_Error} = \sqrt{\text{Error\_X}^2 + \text{Error\_Y}^2 + \text{Error\_Z}^2}$$
-- **$\text{Error\_Clock}$**: Satellite onboard clock bias error ($\text{seconds}$).
-
-### Data Cleaning & Preprocessing
-1. **Completeness Filtering**: Only satellites with complete 768-step sequences are retained (incomplete satellites like `G20`, `R11`, `R28` are removed to prevent sliding-window gaps).
-2. **Gross Outlier Rejection**: Erroneous initialisation anomalies with $3\text{D Error} \ge 50\text{ km}$ are filtered.
-3. **Leakage-Free Scaling**: A unified `StandardScaler` is fitted strictly on the Day 1–7 training partition and applied to test observations.
+- **$\text{3D\_Orbit\_Error}$**: Euclidean norm of the coordinate errors: $\sqrt{\Delta X^2 + \Delta Y^2 + \Delta Z^2}$ ($\text{metres}$).
+- **$\text{Error\_Clock}$**: Satellite onboard atomic clock offset / bias ($\text{seconds}$).
 
 ---
 
-## 🧠 Architecture & Methodology
+## 🏗️ Modular Python Script Architecture
 
-### 1. Production BiLSTM + GRU Model (`gnss_forecast.py`)
+The codebase is refactored from notebooks into a clean, production-grade modular Python package:
 
-A unified multi-step neural network trained simultaneously across all operational satellites:
-
-```mermaid
-flowchart LR
-    A["Input Look-back Window<br/>(96 steps × 5 features)"] --> B["Bidirectional LSTM<br/>(32/64 units, return_seq=True)"]
-    B --> C["Spatial Dropout (0.3)"]
-    C --> D["GRU Compression<br/>(64 units, return_seq=False)"]
-    D --> E["Dropout (0.11) + LayerNormalization"]
-    E --> F["Dense Projection Head<br/>(64 units, ReLU)"]
-    F --> G["Dense Output + Reshape<br/>(96 steps × 5 targets)"]
+```
+Satellite ML/
+├── src/
+│   ├── __init__.py               # Package metadata
+│   ├── config.py                 # Central configurations, targets, time parameters, default hyperparameters
+│   ├── data.py                   # Ingestion, cleaning, outlier filtering, cyclical/rolling features, dataset builders
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── keras_bilstm.py       # TensorFlow / Keras BiLSTM + GRU model
+│   │   ├── pytorch_bilstm.py     # PyTorch BiLSTM + GRU equivalent (dual-backend support)
+│   │   ├── pytorch_transformer.py# Multi-Task Transformer Forecaster with Probabilistic & Spike heads
+│   │   ├── pytorch_diffusion.py  # Conditional Diffusion Denoiser & reverse sampling
+│   │   └── losses.py             # Custom losses (Gaussian NLL, BCE spike, smoothness, FFT frequency, clock acceleration)
+│   ├── evaluate.py               # Multi-horizon (15m, 30m, 1h, 2h, 6h, 12h, 24h) and per-satellite metric calculation
+│   └── visualize.py              # Diagnostic plotting (training curves, heatmaps, residuals, uncertainty bands, FFT spectra)
+├── train_bilstm.py               # BiLSTM + GRU training & evaluation CLI entrypoint
+├── train_transformer.py          # PyTorch Transformer & Diffusion training & evaluation CLI entrypoint
+├── tune.py                       # Optuna Bayesian hyperparameter optimization CLI entrypoint
+├── main.py                       # Master CLI runner
+├── gnss_forecast.py              # Backward-compatible wrapper
+├── FINAL_Data.csv                # 8-day 15-minute GNSS dataset (GPS + GLONASS)
+└── requirements.txt              # Unified dependencies file
 ```
 
-- **BiLSTM Layer**: Encodes both forward and backward temporal dynamics in the lookback window, capturing diurnal periodicity and drift trends.
-- **GRU Bottleneck**: Condenses temporal sequences into an informative latent state with fewer parameters than stacked LSTMs.
-- **Layer Normalization**: Stabilizes optimization across disparate error magnitudes between satellites and orbital planes.
-- **Huber Loss Function**: Blends MSE near zero with MAE for tails, delivering robustness against non-Gaussian orbital outliers:
-  $$L_\delta(y, \hat{y}) = \begin{cases} \frac{1}{2}(y - \hat{y})^2 & \text{for } |y - \hat{y}| \le \delta \\ \delta \cdot (|y - \hat{y}| - \frac{1}{2}\delta) & \text{otherwise} \end{cases}$$
-- **Direct Multi-Step Forecasting**: Eliminates error accumulation inherent to autoregressive recursive rollouts.
-
 ---
 
-### 2. Experimental Probabilistic Transformer
+## 🔬 Architecture & Methodology
 
-Implemented in PyTorch within [`Satellite_ML_Updated_Horizon_Evaluation.ipynb`](Satellite_ML_Updated_Horizon_Evaluation.ipynb):
-- **Satellite Entity Embeddings**: $d_{\text{embed}}=8$ categorical PRN embeddings concatenated with kinematic features.
-- **Sinusoidal Positional Encoding & Multi-Head Self-Attention**: Captures long-range orbital harmonics.
-- **Context Aggregator & Future Query Decoder**: Generates 96 future token representations via cross-attention.
-- **Dual Multi-Task Output Heads**:
-  - **Probabilistic Head**: Outputs Gaussian distribution parameters $(\mu, \sigma)$ for calibrated epistemic/aleatoric uncertainty bands.
-  - **Spike Detection Head**: Binary classification head predicting anomalous clock resets or rapid trajectory maneuvers to condition predictions.
+### 1. Production BiLSTM + GRU Forecaster (`train_bilstm.py`)
 
----
+A single shared recurrent forecaster trained across all complete satellites to capture generalizable orbital dynamics:
+
+```
+Input: Lookback Window (96 timesteps × 5 target features)
+  │
+  ├──► Bidirectional LSTM Layer (32 units, Dropout=0.3)
+  │      └── Captures forward & backward temporal dynamics
+  │
+  ├──► GRU Layer (64 units, Dropout=0.11)
+  │      └── Compresses representation into final state vector
+  │
+  ├──► Layer Normalization
+  │
+  ├──► Dense Projection (64 units, ReLU)
+  │
+  └──► Output Layer: Dense(96 × 5) ──► Reshape(96, 5)
+         └── Direct multi-step 24-hour prediction
+```
+
+- **Loss Function**: Huber Loss ($\delta = 1.0$) for outlier-robust training.
+- **Normalization**: `StandardScaler` fitted exclusively on Day 1-7 training partitions.
+
+### 2. Deep Transformer & Diffusion Forecaster (`train_transformer.py`)
+
+A physics-informed multi-task Transformer architecture incorporating:
+- **Satellite Entity Embeddings**: Learned vector representations for PRNs.
+- **Context Compression & Future Query Decoder**: Self-attention pooling projecting global state onto future tokens.
+- **Probabilistic Head**: Gaussian distribution parameters $(\mu, \sigma)$ with softplus activation.
+- **Spike Detection Head**: Binary classification of perturbation events.
+- **Physics-Informed Loss**:
+  $$\mathcal{L} = \mathcal{L}_{\text{NLL}} + \lambda_{\text{spike}} \mathcal{L}_{\text{BCE}} + \lambda_{\text{smooth}} \mathcal{L}_{\text{accel}} + \lambda_{\text{multi}} \mathcal{L}_{\text{multi}} + \lambda_{\text{freq}} \mathcal{L}_{\text{FFT}} + \lambda_{\text{clock}} \mathcal{L}_{\text{drift}}$$
+- **Conditional Diffusion Denoiser**: 100-step reverse diffusion sampling for stochastic uncertainty quantification.
 
 ### 3. Bayesian Hyperparameter Tuning (`tune.py`)
 
-Automated hyperparameter optimization using **Optuna** over:
-- `bilstm_units` $\in [32, 64, 128]$
-- `gru_units` $\in [16, 32, 64]$
-- `dropout_1`, `dropout_2` $\in [0.1, 0.4]$
-- `learning_rate` $\in [10^{-4}, 5 \times 10^{-3}]$ (log scale)
-- `batch_size` $\in [32, 64]$
+Automated Optuna optimization over:
+- BiLSTM units $\in \{32, 64, 128\}$
+- GRU units $\in \{16, 32, 64\}$
+- Dropout rates $\in [0.1, 0.4]$
+- Learning rate $\in [10^{-4}, 5 \times 10^{-3}]$ (log scale)
+- Batch size $\in \{32, 64\}$
 
 ---
 
 ## 📈 Performance & Benchmark Results
 
-Evaluated on Day 8 across all valid GPS and GLONASS satellites:
+Evaluated on out-of-sample Day 8 across **51 complete satellites** (31 GPS, 20 GLONASS):
 
-### Overall Aggregate Performance (24-Hour Forecast)
+### 24-Hour Horizon Aggregate Performance
 
-| Target | Mean MAE | Mean RMSE | Units |
+| Target Metric | Mean MAE | Mean RMSE | Units |
 | :--- | :---: | :---: | :---: |
-| **`Error_X`** | ~2,030.28 | ~5,458.48 | metres |
-| **`Error_Y`** | ~2,048.32 | ~5,472.55 | metres |
-| **`Error_Z`** | ~2,023.15 | ~5,463.05 | metres |
-| **`3D_Orbit_Error`** | ~2,051.13 | ~4,428.85 | metres |
-| **`Error_Clock`** | ~0.0118 | ~0.1017 | seconds |
+| **Error_X** | `2,127.25` | `5,459.39` | metres |
+| **Error_Y** | `2,132.81` | `5,487.25` | metres |
+| **Error_Z** | `2,131.09` | `5,462.24` | metres |
+| **3D_Orbit_Error** | `3,178.14` | `6,133.04` | metres |
+| **Error_Clock** | `0.011956` | `0.101967` | seconds |
 
 ### Multi-Horizon MAE Breakdown
 
-| Validity Window | `Error_X` (m) | `Error_Y` (m) | `Error_Z` (m) | `3D_Orbit_Error` (m) | `Error_Clock` (s) |
+| Forecast Horizon | Error_X (m) | Error_Y (m) | Error_Z (m) | 3D Orbit Error (m) | Clock Error (s) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **15 min** (1 step) | 7,212.57 | 9,911.36 | 7,509.42 | 5,153.71 | 0.9958 |
-| **30 min** (2 steps) | 3,615.66 | 4,965.88 | 3,761.46 | 2,750.38 | 0.4985 |
-| **1 hour** (4 steps) | 1,815.22 | 2,490.24 | 1,899.24 | 1,502.02 | 0.2504 |
-| **2 hours** (8 steps) | 2,910.63 | 3,097.55 | 2,744.54 | 2,605.92 | 0.1260 |
-| **24 hours** (96 steps) | 2,030.29 | 2,048.32 | 2,023.15 | 2,051.13 | 0.0118 |
+| **15 min** | 7,207.65 | 10,015.80 | 7,609.16 | 4,790.71 | 0.998872 |
+| **30 min** | 3,717.18 | 5,025.48 | 3,905.18 | 3,560.41 | 0.501114 |
+| **1 hour** | 1,941.31 | 2,533.73 | 1,966.98 | 2,670.96 | 0.250930 |
+| **2 hours** | 3,005.02 | 3,133.41 | 2,797.60 | 4,236.85 | 0.126044 |
+| **6 hours** | 2,333.53 | 2,276.46 | 2,272.81 | 3,395.47 | 0.043405 |
+| **12 hours** | 2,226.27 | 2,186.57 | 2,096.09 | 3,047.27 | 0.022487 |
+| **24 hours** | 2,127.25 | 2,132.81 | 2,131.09 | 3,178.14 | 0.011956 |
 
 ---
 
-## 📁 Repository Structure
+## ⚙️ Installation & Virtual Environment Setup
 
-```text
-Satellite ML/
-├── gnss_forecast.py                     # Main end-to-end training, forecasting & evaluation pipeline
-├── tune.py                              # Optuna hyperparameter optimization script
-├── gnss_optuna.py                       # Standalone tuning script with modular pipeline
-├── FINAL_Data.csv                       # 8-day 15-minute GNSS dataset (GPS + GLONASS)
-├── FINAL_Data.zip                       # Compressed dataset archive
-├── Run_Generation.ipynb                 # Automated execution notebook for Colab / cloud runs
-├── Run_Tuning.ipynb                     # Automated Optuna tuning notebook for Colab
-├── Satellite_ML_Updated_Horizon_...ipynb# PyTorch Transformer with Probabilistic & Spike heads
-├── Satellite ML.ipynb                   # Exploratory analysis & baseline experimentation
-└── gnss_results/                        # Saved artifacts & publication-ready diagnostic figures
-    ├── gnss_model.keras                 # Serialized trained Keras model
-    ├── metrics_summary.json             # Full per-satellite and aggregate evaluation metrics
-    ├── 01_training_history.png          # Huber loss & MAE training/validation curves
-    ├── 02_prediction_vs_actual_GPS.png  # Day-8 prediction vs actual for GPS satellites
-    ├── 03_prediction_vs_actual_GLONASS.png # Day-8 prediction vs actual for GLONASS satellites
-    ├── 04_multihorizon_mae_heatmap.png  # Multi-horizon error heatmap
-    ├── 05_residual_distributions.png    # Residual distribution & normality verification
-    └── 06_per_satellite_mae.png         # Comparative per-PRN MAE bar chart
-```
-
----
-
-## ⚙️ Installation & Setup
-
-### Prerequisites
-- Python 3.10 or higher
-- Recommended: Virtual environment (`venv` or `conda`)
-- GPU support recommended (CUDA-compatible GPU)
-
-### 1. Clone & Set Up Environment
+### 1. Create Virtual Environment
 
 ```bash
-# Clone the repository
-git clone https://github.com/KJ-CORE/Satellite_Ephemeris.git
-cd Satellite_Ephemeris
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
 # Windows (PowerShell):
+python -m venv .venv
 .venv\Scripts\Activate.ps1
+
 # Linux / macOS:
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 
 ### 2. Install Dependencies
 
 ```bash
-pip install tensorflow torch scikit-learn pandas numpy matplotlib optuna tqdm
+pip install -r requirements.txt
 ```
 
 ---
 
-## 🚀 Usage Guide
+## 🚀 CLI Usage Guide
 
-### Train & Evaluate Pipeline
+### 1. Unified CLI Runner (`main.py`)
 
-To run the complete data loading, sequence building, BiLSTM+GRU model training, Day-8 forecasting, and report generation:
+Run any pipeline via `main.py`:
 
 ```bash
-python gnss_forecast.py --data FINAL_Data.csv --output ./gnss_results
-```
+# Run BiLSTM + GRU Forecaster
+.venv\Scripts\python.exe main.py --model bilstm --data FINAL_Data.csv --output ./gnss_results
 
-**CLI Arguments:**
-- `--data`: Path to input dataset CSV (default: `FINAL_Data.csv`).
-- `--output`: Output directory where models, plots, and JSON metrics will be saved (default: `./gnss_results`).
+# Run PyTorch Transformer Forecaster with Conditional Diffusion
+.venv\Scripts\python.exe main.py --model transformer --data FINAL_Data.csv --output ./transformer_results --enable-diffusion
+
+# Run Optuna Hyperparameter Tuning
+.venv\Scripts\python.exe main.py --model tune --data FINAL_Data.csv --n-trials 15
+```
 
 ---
 
-### Hyperparameter Optimization
-
-To find optimal network capacity, dropout rates, and learning rates with Optuna:
+### 2. Train BiLSTM + GRU Pipeline (`train_bilstm.py`)
 
 ```bash
-python tune.py --data FINAL_Data.csv
+.venv\Scripts\python.exe train_bilstm.py --data FINAL_Data.csv --output ./gnss_results --epochs 60 --batch-size 64
 ```
+
+**Key Arguments:**
+- `--data`: Path to dataset CSV (default: `FINAL_Data.csv`).
+- `--output`: Output directory for models and plots (default: `./gnss_results`).
+- `--epochs`: Number of training epochs (default: `60`).
+- `--batch-size`: Mini-batch size (default: `64`).
+- `--lr`: Learning rate (default: `1.56e-3`).
+- `--backend`: Execution backend (`auto`, `keras`, or `torch`).
 
 ---
 
-### Google Colab Execution
+### 3. Train Transformer & Diffusion Pipeline (`train_transformer.py`)
 
-For fast execution using Google Colab GPUs:
-1. Open [`Run_Generation.ipynb`](Run_Generation.ipynb) to download data, train the model, and export `gnss_results.zip`.
-2. Open [`Run_Tuning.ipynb`](Run_Tuning.ipynb) to execute Bayesian hyperparameter optimization.
+```bash
+.venv\Scripts\python.exe train_transformer.py --data FINAL_Data.csv --output ./transformer_results --epochs 30 --enable-diffusion
+```
+
+**Key Arguments:**
+- `--epochs`: Transformer training epochs (default: `30`).
+- `--diffusion-epochs`: Diffusion training epochs (default: `80`).
+- `--enable-diffusion`: Flag to train conditional diffusion denoiser.
+- `--d-model`: Transformer hidden dimension (default: `64`).
+- `--nhead`: Number of multi-head attention heads (default: `4`).
+- `--device`: Target compute device (`cuda` or `cpu`).
+
+---
+
+### 4. Hyperparameter Optimization (`tune.py`)
+
+```bash
+.venv\Scripts\python.exe tune.py --data FINAL_Data.csv --n-trials 20
+```
 
 ---
 
 ## 📊 Generated Visualizations & Diagnostics
 
-All outputs generated by `gnss_forecast.py` are saved directly to `gnss_results/`:
+All outputs generated by the training scripts are saved directly to the designated output folder:
 
 | Artifact | Description |
 | :--- | :--- |
-| `01_training_history.png` | Huber loss and MAE convergence profiles over training epochs. |
-| `02_prediction_vs_actual_GPS.png` | 24-hour ahead time-series overlay of predicted vs ground-truth 3D orbit and clock errors for GPS satellites. |
+| `01_training_history.png` | Loss and metric convergence profiles over training epochs. |
+| `02_prediction_vs_actual_GPS.png` | 24-hour time-series overlay of predicted vs ground-truth errors for GPS satellites. |
 | `03_prediction_vs_actual_GLONASS.png` | Time-series prediction overlay for GLONASS satellites. |
-| `04_multihorizon_mae_heatmap.png` | Cross-horizon error propagation heatmap (15m, 30m, 1h, 2h, 24h). |
+| `04_multihorizon_mae_heatmap.png` | Multi-horizon error heatmap across forecast intervals (15m to 24h). |
 | `05_residual_distributions.png` | Residual histogram with fitted Gaussian curves verifying zero-mean unbiased predictions. |
 | `06_per_satellite_mae.png` | Comparative bar chart showing individual MAE across all evaluated PRNs. |
 | `metrics_summary.json` | Comprehensive machine-readable metrics report containing per-satellite and aggregate MAE/RMSE. |
