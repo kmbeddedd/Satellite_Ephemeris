@@ -4,6 +4,7 @@ Data Processing, Feature Engineering, and Dataset Builders for GNSS Forecasting
 
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from typing import Tuple, List, Dict, Optional
 
@@ -266,8 +267,43 @@ def prepare_pytorch_datasets(
         "output_dim": len(target_cols),
         "X_train": X_train,
         "Y_train": Y_train,
+        "SAT_train": SAT_train,
+        "SPIKE_train": SPIKE_train,
         "X_val": X_val,
         "Y_val": Y_val,
+        "SAT_val": SAT_val,
+        "SPIKE_val": SPIKE_val,
         "X_test": X_test,
-        "Y_test": Y_test
+        "Y_test": Y_test,
+        "SAT_test": SAT_test,
+        "SPIKE_test": SPIKE_test
     }
+
+
+class FastGPUTensorLoader:
+    """
+    Zero-overhead direct GPU VRAM Tensor Loader.
+    Keeps all data resident in GPU VRAM memory and slices mini-batches purely on CUDA.
+    Completely eliminates CPU-to-GPU transfer bottleneck and maximizes GPU SM utilization.
+    """
+    def __init__(self, tensors: tuple, batch_size: int = 128, shuffle: bool = True, device: torch.device = None):
+        self.tensors = [t.to(device) if device is not None else t for t in tensors]
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.num_samples = len(self.tensors[0])
+        self.num_batches = (self.num_samples + batch_size - 1) // batch_size
+        self.device = device or self.tensors[0].device
+
+    def __iter__(self):
+        if self.shuffle:
+            indices = torch.randperm(self.num_samples, device=self.device)
+        else:
+            indices = torch.arange(self.num_samples, device=self.device)
+
+        for i in range(self.num_batches):
+            batch_idx = indices[i * self.batch_size : (i + 1) * self.batch_size]
+            yield tuple(t[batch_idx] for t in self.tensors)
+
+    def __len__(self):
+        return self.num_batches
+

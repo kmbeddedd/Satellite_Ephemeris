@@ -1,8 +1,9 @@
 """
 CLI Entrypoint for Deep Multi-Task Hybrid Architecture (BiLSTM-GRU-MHSA + Heads + Diffusion)
-Implements:
-- Full GPU CUDA Acceleration with pin_memory and non-blocking streaming
-- Time2Vec and Dynamic PRN Entity Embeddings
+Maximized for 100% GPU Compute Utilization:
+- In-VRAM GPU Data Resident Caching (FastGPUTensorLoader)
+- Automatic Mixed Precision (AMP / FP16 Tensor Cores)
+- Time2Vec and Dynamic PRN Entity Embeddings (de = ceil(1.6 * gamma^0.52))
 - Probabilistic Gaussian Parameter Regression Head with Gaussian NLL
 - Supervised Binary Event Classifier with BCE
 - 100-step Conditional DDPM Diffusion Denoiser
@@ -26,7 +27,7 @@ from src.config import (
     DIFFUSION_DEFAULTS,
     DEFAULT_SEED
 )
-from src.data import prepare_pytorch_datasets
+from src.data import prepare_pytorch_datasets, FastGPUTensorLoader
 from src.models.pytorch_transformer import GNSSForecaster
 from src.models.pytorch_diffusion import ConditionalDiffusionDenoiser, DiffusionSchedule, sample_diffusion_forecast
 from src.models.losses import composite_transformer_loss, diffusion_mse_loss
@@ -41,13 +42,13 @@ from src.visualize import (
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Deep Hybrid Sequence Forecaster with DDPM")
+    parser = argparse.ArgumentParser(description="Train Deep Hybrid Sequence Forecaster with DDPM (Max GPU)")
     parser.add_argument("--data", default=DEFAULT_DATA_PATH, help="Path to CSV dataset")
     parser.add_argument("--output", default="./transformer_results", help="Directory to save artifacts")
     parser.add_argument("--epochs", type=int, default=25, help="Transformer training epochs")
     parser.add_argument("--diffusion-epochs", type=int, default=20, help="Diffusion training epochs")
-    parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1.5e-3, help="Learning rate")
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size (larger saturates GPU cores)")
+    parser.add_argument("--lr", type=float, default=2.0e-3, help="Learning rate")
     parser.add_argument("--d-model", type=int, default=64, help="Model hidden dimension")
     parser.add_argument("--bilstm-units", type=int, default=48, help="BiLSTM hidden units")
     parser.add_argument("--gru-units", type=int, default=48, help="GRU hidden units")
@@ -59,37 +60,40 @@ def parse_args():
     return parser.parse_args()
 
 
-def train_one_epoch(model, loader, optimizer, device):
+def train_one_epoch(model, loader, optimizer, scaler_amp, use_amp):
     model.train()
     total_loss = 0.0
 
-    for x, y, sat, spikes in tqdm(loader, desc="Train Epoch", leave=False):
-        x = x.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
-        sat = sat.to(device, non_blocking=True)
-        spikes = spikes.to(device, non_blocking=True)
+    for x, y, sat, spikes in loader:
+        optimizer.zero_grad(set_to_none=True)
 
-        optimizer.zero_grad()
-        mu, sigma, spike_probs, _ = model(x, sat)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            mu, sigma, spike_probs, _ = model(x, sat)
+            loss = composite_transformer_loss(
+                mu=mu,
+                sigma=sigma,
+                spike_probs=spike_probs,
+                targets=y,
+                spike_targets=spikes
+            )
 
-        loss = composite_transformer_loss(
-            mu=mu,
-            sigma=sigma,
-            spike_probs=spike_probs,
-            targets=y,
-            spike_targets=spikes
-        )
-
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
+        if use_amp:
+            scaler_amp.scale(loss).backward()
+            scaler_amp.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler_amp.step(optimizer)
+            scaler_amp.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
 
         total_loss += loss.item()
 
     return total_loss / len(loader)
 
 
-def validate_epoch(model, loader, device):
+def validate_epoch(model, loader, use_amp):
     model.eval()
     total_loss = 0.0
     sigmas = []
@@ -97,20 +101,15 @@ def validate_epoch(model, loader, device):
 
     with torch.no_grad():
         for x, y, sat, spike_targets in loader:
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
-            sat = sat.to(device, non_blocking=True)
-            spike_targets = spike_targets.to(device, non_blocking=True)
-
-            mu, sigma, spike_probs, _ = model(x, sat)
-
-            loss = composite_transformer_loss(
-                mu=mu,
-                sigma=sigma,
-                spike_probs=spike_probs,
-                targets=y,
-                spike_targets=spike_targets
-            )
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                mu, sigma, spike_probs, _ = model(x, sat)
+                loss = composite_transformer_loss(
+                    mu=mu,
+                    sigma=sigma,
+                    spike_probs=spike_probs,
+                    targets=y,
+                    spike_targets=spike_targets
+                )
 
             total_loss += loss.item()
             sigmas.append(sigma.mean().item())
@@ -119,14 +118,11 @@ def validate_epoch(model, loader, device):
     return total_loss / len(loader), float(np.mean(sigmas)), float(np.mean(spikes))
 
 
-def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimizer, device):
+def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimizer, scaler_amp, use_amp, device):
     diffusion_model.train()
     total_epoch_loss = 0.0
 
-    for x, y, sat, _ in tqdm(loader, desc="Diffusion Train Epoch", leave=False):
-        x = x.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
-        sat = sat.to(device, non_blocking=True)
+    for x, y, sat, _ in loader:
         batch_size = y.shape[0]
 
         with torch.no_grad():
@@ -136,13 +132,23 @@ def train_diffusion_epoch(forecaster, diffusion_model, schedule, loader, optimiz
         residual = y - mu
         noisy_residual, true_noise = schedule.forward_sample(residual, t)
 
-        optimizer.zero_grad()
-        predicted_noise = diffusion_model(noisy_residual, context, t)
-        loss = diffusion_mse_loss(predicted_noise, true_noise)
-        loss.backward()
+        optimizer.zero_grad(set_to_none=True)
 
-        torch.nn.utils.clip_grad_norm_(diffusion_model.parameters(), max_norm=1.0)
-        optimizer.step()
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            predicted_noise = diffusion_model(noisy_residual, context, t)
+            loss = diffusion_mse_loss(predicted_noise, true_noise)
+
+        if use_amp:
+            scaler_amp.scale(loss).backward()
+            scaler_amp.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(diffusion_model.parameters(), max_norm=1.0)
+            scaler_amp.step(optimizer)
+            scaler_amp.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(diffusion_model.parameters(), max_norm=1.0)
+            optimizer.step()
+
         total_epoch_loss += loss.item()
 
     return total_epoch_loss / len(loader)
@@ -161,12 +167,14 @@ def run_training():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
+    use_amp = (device.type == "cuda")
     if device.type == "cuda":
         torch.cuda.manual_seed_all(args.seed)
         torch.backends.cudnn.benchmark = True
         gpu_name = torch.cuda.get_device_name(device)
         total_vram = torch.cuda.get_device_properties(device).total_memory / (1024 ** 3)
         print(f"  Target Compute Device: GPU -> {gpu_name} ({total_vram:.2f} GB VRAM)")
+        print(f"  Acceleration: In-VRAM GPU Direct Residency + Mixed Precision Tensor Cores")
     else:
         print("  Target Compute Device: CPU")
 
@@ -178,9 +186,26 @@ def run_training():
         batch_size=args.batch_size
     )
 
-    train_loader = data_bundle["train_loader"]
-    val_loader = data_bundle["val_loader"]
-    test_loader = data_bundle["test_loader"]
+    # In-VRAM GPU Loaders (Zero host-to-device bottlenecks)
+    t_xtrain = torch.tensor(data_bundle["X_train"], dtype=torch.float32, device=device)
+    t_ytrain = torch.tensor(data_bundle["Y_train"], dtype=torch.float32, device=device)
+    t_sattrain = torch.tensor(data_bundle["SAT_train"], dtype=torch.long, device=device)
+    t_spikrain = torch.tensor(data_bundle["SPIKE_train"], dtype=torch.float32, device=device)
+
+    t_xval = torch.tensor(data_bundle["X_val"], dtype=torch.float32, device=device)
+    t_yval = torch.tensor(data_bundle["Y_val"], dtype=torch.float32, device=device)
+    t_satval = torch.tensor(data_bundle["SAT_val"], dtype=torch.long, device=device)
+    t_spikval = torch.tensor(data_bundle["SPIKE_val"], dtype=torch.float32, device=device)
+
+    t_xtest = torch.tensor(data_bundle["X_test"], dtype=torch.float32, device=device)
+    t_ytest = torch.tensor(data_bundle["Y_test"], dtype=torch.float32, device=device)
+    t_sattest = torch.tensor(data_bundle["SAT_test"], dtype=torch.long, device=device)
+    t_spiktest = torch.tensor(data_bundle["SPIKE_test"], dtype=torch.float32, device=device)
+
+    train_loader = FastGPUTensorLoader((t_xtrain, t_ytrain, t_sattrain, t_spikrain), batch_size=args.batch_size, shuffle=True, device=device)
+    val_loader = FastGPUTensorLoader((t_xval, t_yval, t_satval, t_spikval), batch_size=args.batch_size, shuffle=False, device=device)
+    test_loader = FastGPUTensorLoader((t_xtest, t_ytest, t_sattest, t_spiktest), batch_size=args.batch_size, shuffle=False, device=device)
+
     target_scaler = data_bundle["target_scaler"]
 
     # 2. Build Deep Multi-Task Hybrid Forecaster
@@ -197,13 +222,14 @@ def run_training():
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=TRANSFORMER_DEFAULTS["weight_decay"])
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=TRANSFORMER_DEFAULTS["lr_patience"])
+    scaler_amp = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     train_losses, val_losses, sigma_means, spike_means = [], [], [], []
 
-    print(f"\nTraining Hybrid Sequence Forecaster ({args.epochs} epochs on {device})...")
+    print(f"\nTraining Hybrid Sequence Forecaster ({args.epochs} epochs, batch={args.batch_size})...")
     for epoch in range(args.epochs):
-        train_loss = train_one_epoch(model, train_loader, optimizer, device)
-        val_loss, sigma_mean, spike_mean = validate_epoch(model, val_loader, device)
+        train_loss = train_one_epoch(model, train_loader, optimizer, scaler_amp, use_amp)
+        val_loss, sigma_mean, spike_mean = validate_epoch(model, val_loader, use_amp)
         scheduler.step(val_loss)
 
         train_losses.append(train_loss)
@@ -236,9 +262,10 @@ def run_training():
         ).to(device)
 
         diff_opt = torch.optim.AdamW(diffusion_model.parameters(), lr=DIFFUSION_DEFAULTS["learning_rate"], weight_decay=DIFFUSION_DEFAULTS["weight_decay"])
+        diff_scaler_amp = torch.amp.GradScaler("cuda", enabled=use_amp)
 
         for epoch in range(args.diffusion_epochs):
-            diff_loss = train_diffusion_epoch(model, diffusion_model, schedule, train_loader, diff_opt, device)
+            diff_loss = train_diffusion_epoch(model, diffusion_model, schedule, train_loader, diff_opt, diff_scaler_amp, use_amp, device)
             if (epoch + 1) % 10 == 0 or epoch == args.diffusion_epochs - 1:
                 print(f"Diffusion Epoch {epoch+1:02d}/{args.diffusion_epochs:02d} | Loss: {diff_loss:.6f}")
 
@@ -253,13 +280,12 @@ def run_training():
 
     with torch.no_grad():
         for x, y, sat, _ in test_loader:
-            x = x.to(device, non_blocking=True)
-            sat = sat.to(device, non_blocking=True)
-            mu, sigma, _, _ = model(x, sat)
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                mu, sigma, _, _ = model(x, sat)
 
-            mu_list.append(mu.cpu().numpy())
-            sigma_list.append(sigma.cpu().numpy())
-            target_list.append(y.numpy())
+            mu_list.append(mu.float().cpu().numpy())
+            sigma_list.append(sigma.float().cpu().numpy())
+            target_list.append(y.float().cpu().numpy())
 
     mu = np.concatenate(mu_list, axis=0)
     sigma = np.concatenate(sigma_list, axis=0)
@@ -301,15 +327,17 @@ def run_training():
 
     if diffusion_model is not None:
         print("Generating Multi-Sample Diffusion Rollouts...")
-        sample_x, _, sample_sat, _ = next(iter(test_loader))
+        sample_x = t_xtest[:1]
+        sample_sat = t_sattest[:1]
         with torch.no_grad():
-            s_mu, _, _, s_context = model(sample_x[:1].to(device), sample_sat[:1].to(device))
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                s_mu, _, _, s_context = model(sample_x, sample_sat)
 
         diff_samples = []
         for _ in range(10):
             sample_gen = sample_diffusion_forecast(
                 diffusion_model, schedule, s_context, s_mu, shape=s_mu.shape, device=device
-            ).cpu().numpy()
+            ).float().cpu().numpy()
             gen_real = target_scaler.inverse_transform(sample_gen.reshape(-1, data_bundle["output_dim"])).reshape(sample_gen.shape)
             diff_samples.append(gen_real[0])
 

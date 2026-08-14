@@ -1,0 +1,107 @@
+{
+  "model": "Deep Multi-Task Hybrid Forecaster (BiLSTM-GRU-MHSA + DDPM)",
+  "aggregate_metrics": {
+    "Error_X": {
+      "Mean_MAE": 0.3855592906475067,
+      "Mean_RMSE": 1.95979905128479
+    },
+    "Error_Y": {
+      "Mean_MAE": 0.34459924697875977,
+      "Mean_RMSE": 2.1868367195129395
+    },
+    "Error_Z": {
+      "Mean_MAE": 0.3469710350036621,
+      "Mean_RMSE": 2.3538930416107178
+    },
+    "Error_Clock": {
+      "Mean_MAE": 0.2964545488357544,
+      "Mean_RMSE": 1.5878617763519287
+    }
+  },
+  "multi_horizon_metrics": {
+    "15 min": {
+      "Error_X_MAE": 1.8956830501556396,
+      "Error_X_RMSE": 9.867822647094727,
+      "Error_Y_MAE": 2.23728084564209,
+      "Error_Y_RMSE": 12.232833862304688,
+      "Error_Z_MAE": 2.139157295227051,
+      "Error_Z_RMSE": 11.74380874633789,
+      "Error_Clock_MAE": 8.294733047485352,
+      "Error_Clock_RMSE": 8.389130592346191,
+      "Overall_MAE": 3.6417136192321777,
+      "Overall_RMSE": 10.66900634765625
+    },
+    "30 min": {
+      "Error_X_MAE": 0.8327782154083252,
+      "Error_X_RMSE": 3.709836483001709,
+      "Error_Y_MAE": 0.9560835957527161,
+      "Error_Y_RMSE": 4.763383865356445,
+      "Error_Z_MAE": 0.9938256740570068,
+      "Error_Z_RMSE": 4.953378200531006,
+      "Error_Clock_MAE": 0.23849798738956451,
+      "Error_Clock_RMSE": 1.1917985677719116,
+      "Overall_MAE": 0.7552964091300964,
+      "Overall_RMSE": 3.949970006942749
+    },
+    "1 hour": {
+      "Error_X_MAE": 0.5075132846832275,
+      "Error_X_RMSE": 1.9414277076721191,
+      "Error_Y_MAE": 0.5047585368156433,
+      "Error_Y_RMSE": 2.146225690841675,
+      "Error_Z_MAE": 0.5276246070861816,
+      "Error_Z_RMSE": 2.466874837875366,
+      "Error_Clock_MAE": 0.23043487966060638,
+      "Error_Clock_RMSE": 1.4096747636795044,
+      "Overall_MAE": 0.4425828158855438,
+      "Overall_RMSE": 2.0278117656707764
+    },
+    "2 hours": {
+      "Error_X_MAE": 0.39217713475227356,
+      "Error_X_RMSE": 1.419933795928955,
+      "Error_Y_MAE": 0.3434049189090729,
+      "Error_Y_RMSE": 1.22568941116333,
+      "Error_Z_MAE": 0.3438321352005005,
+      "Error_Z_RMSE": 1.5933574438095093,
+      "Error_Clock_MAE": 0.23030990362167358,
+      "Error_Clock_RMSE": 1.4099323749542236,
+      "Overall_MAE": 0.3274310231208801,
+      "Overall_RMSE": 1.4182052612304688
+    },
+    "6 hours": {
+      "Error_X_MAE": 0.2972838878631592,
+      "Error_X_RMSE": 1.1515347957611084,
+      "Error_Y_MAE": 0.23030664026737213,
+      "Error_Y_RMSE": 0.6957948803901672,
+      "Error_Z_MAE": 0.22871778905391693,
+      "Error_Z_RMSE": 1.24515700340271,
+      "Error_Clock_MAE": 0.24111118912696838,
+      "Error_Clock_RMSE": 1.453321933746338,
+      "Overall_MAE": 0.24935486912727356,
+      "Overall_RMSE": 1.1696926355361938
+    },
+    "12 hours": {
+      "Error_X_MAE": 0.2547457218170166,
+      "Error_X_RMSE": 1.089443325996399,
+      "Error_Y_MAE": 0.18525318801403046,
+      "Error_Y_RMSE": 0.5664926171302795,
+      "Error_Z_MAE": 0.18786081671714783,
+      "Error_Z_RMSE": 1.1919468641281128,
+      "Error_Clock_MAE": 0.2089226245880127,
+      "Error_Clock_RMSE": 1.3267425298690796,
+      "Overall_MAE": 0.2091955840587616,
+      "Overall_RMSE": 1.0826799869537354
+    },
+    "24 hours": {
+      "Error_X_MAE": 1.8731987476348877,
+      "Error_X_RMSE": 9.708549499511719,
+      "Error_Y_MAE": 2.345630168914795,
+      "Error_Y_RMSE": 12.806756019592285,
+      "Error_Z_MAE": 2.297696352005005,
+      "Error_Z_RMSE": 12.591184616088867,
+      "Error_Clock_MAE": 0.24273787438869476,
+      "Error_Clock_RMSE": 1.4606809616088867,
+      "Overall_MAE": 1.6898157596588135,
+      "Overall_RMSE": 10.234017372131348
+    }
+  }
+}
