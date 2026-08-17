@@ -1,0 +1,186 @@
+================================================================================
+  STATE-OF-THE-ART TIME SERIES FORECASTING: RESEARCH PAPERS & PRACTICAL METHODS
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Key Architectural Innovations (2022–2026)
+2. High-Impact Preprocessing & Normalization Techniques
+3. Objective Functions & Loss Formulations Beyond MSE
+4. Time Series Foundation Models (TSFMs)
+5. Physics-Informed & Residual Hybrid Modeling
+6. Uncertainty Quantification & Validation Rigor
+7. Practical Engineering Roadmap & Prioritized Checklist
+
+================================================================================
+1. KEY ARCHITECTURAL INNOVATIONS (2022–2026)
+================================================================================
+
+1.1 PatchTST (Subseries Patching & Channel Independence)
+    - Key Paper: "A Time Series is Worth 64 Words: Long-term Forecasting with Transformers" (Nie et al., ICLR 2023)
+    - Mechanism:
+      * Segments lookback series into overlapping subseries patches (e.g., patch size 16, stride 8).
+      * Subseries tokens preserve local temporal semantic context and reduce quadratic attention complexity O(L^2) to O((L/P)^2).
+      * Channel Independence (CI): Each multivariate channel is processed independently with shared model weights, avoiding overfitting to inter-channel noise.
+    - Best Use Case: Long-horizon forecasting and noisy multivariate signals.
+
+1.2 iTransformer (Inverted Multidimensional Attention)
+    - Key Paper: "iTransformer: Inverted Transformers Are Effective for Time Series Forecasting" (Liu et al., ICLR 2024)
+    - Mechanism:
+      * Standard Transformers attend across timestamps and mix variates in feed-forward layers.
+      * iTransformer inverts this: the entire lookback sequence of a single variate is embedded as one token.
+      * Self-attention models cross-variable correlations; Feed-Forward Networks model individual temporal patterns.
+    - Best Use Case: Dense multivariate datasets where inter-variable dependencies are critical (e.g., multi-axis sensor fusion, interconnected telemetry).
+
+1.3 Decomposable Linear & Multiscale MLPs (DLinear & TimeMixer)
+    - Key Papers:
+      * "Are Transformers Effective for Time Series?" (Zeng et al., AAAI 2023 - DLinear/N-Linear)
+      * "TimeMixer: Decomposable Multiscale Mixing for Time Series Forecasting" (Wang et al., ICLR 2024)
+    - Mechanism:
+      * DLinear separates series into Trend (moving average) and Seasonality, applying simple linear mappings to each.
+      * TimeMixer samples the time series at multiple resolutions (1x, 2x, 4x, etc.), applies Past-Decomposable Mixing (PDM), and ensembles predictions with Future-Multipredictor Mixing (FMM).
+    - Best Use Case: Ultra-fast training and inference (10x-100x faster than Transformers) with competitive or superior accuracy on periodic data.
+
+1.4 State Space Models (Mamba for Time Series)
+    - Key Papers:
+      * "TimeMachine: A Time Series is Worth 4 Mambas for Long-term Forecasting" (Ahamed & Cheng, 2024)
+      * "S-Mamba: State Space Model for Time Series Forecasting" (Wang et al., 2024)
+    - Mechanism:
+      * Replaces attention with selective state space layers achieving linear O(L) computational and memory complexity.
+      * Allows processing extremely long context horizons (thousands of steps) without quadratic memory blowup.
+
+1.5 Generative Diffusion Models for Probabilistic Forecasting
+    - Key Papers:
+      * "CSDI: Conditional Score-based Diffusion Models for Probabilistic Time Series Imputation and Forecasting" (Tashiro et al., NeurIPS 2021)
+      * "Diffusion-TS: Interpretable Diffusion for General Time Series Generation" (Yuan et al., ICLR 2024)
+      * "TimeGrad: Autoregressive Denoising Diffusion Models" (Rasul et al., ICML 2021)
+    - Mechanism:
+      * Treats future trajectory generation as an iterative denoising score-matching process conditioned on historical context.
+      * Effectively models multimodal and non-Gaussian future distributions, preventing blurred/averaged predictions.
+
+================================================================================
+2. HIGH-IMPACT PREPROCESSING & NORMALIZATION TECHNIQUES
+================================================================================
+
+2.1 Reversible Instance Normalization (RevIN)
+    - Key Paper: "Reversible Instance Normalization for Accurate Time-Series Forecasting against Distribution Shift" (Kim et al., ICLR 2022)
+    - Mechanism:
+      1. Instance Normalization: Subtract the mean and divide by the standard deviation of each input instance.
+      2. Feed normalized data into the neural network backbone.
+      3. Denormalization Layer: Multiply output predictions by the original input standard deviation and add the input mean.
+    - Impact: Resolves non-stationarity and distribution shift, consistently reducing MSE/MAE across deep architectures by 15% to 30%.
+
+2.2 Spectral & Frequency-Domain Transforms (FFT / DWT / MODWT)
+    - Key Papers: "FEDformer" (Zhou et al., ICML 2022), "FITS" (Xu et al., ICLR 2024)
+    - Mechanism:
+      * Decompose time series into frequency components using Fast Fourier Transform (FFT) or Maximal Overlap Discrete Wavelet Transform (MODWT).
+      * Process compact low-frequency trends and high-frequency wavelets separately, improving modeling of complex orbital/cyclic dynamics.
+
+2.3 Stationarization & Difference Transforms
+    - First-order differencing (y_t - y_{t-1}) or percentage returns to eliminate deterministic linear drift before neural modeling, followed by cumulative re-integration at inference.
+
+================================================================================
+3. OBJECTIVE FUNCTIONS & LOSS FORMULATIONS BEYOND MSE
+================================================================================
+
+Standard Mean Squared Error (MSE) often leads to two major issues: "lagged/phase-delayed predictions" and "oversmoothed peak values".
+
+3.1 DILATE Loss (Shape and Temporal Alignment)
+    - Key Paper: "Non-Stationary Time-Series Forecasting with DILATE Loss" (Le Guen & Thome, NeurIPS 2019)
+    - Mechanism:
+      * Loss = alpha * Loss_shape + (1 - alpha) * Loss_temporal
+      * Loss_shape uses a differentiable Dynamic Time Warping (soft-DTW) to penalize shape mismatch.
+      * Loss_temporal penalizes timing/phase distortion between true and predicted peaks.
+    - Impact: Completely eliminates phase-lag artifacts common in MSE-trained models.
+
+3.2 Quantile / Pinball Loss (Probabilistic Forecasting)
+    - Loss_q(y, y_hat) = max(q * (y - y_hat), (1 - q) * (y_hat - y))
+    - Predicts specific percentiles (e.g., p10, p50, p90) to generate robust prediction intervals under asymmetric penalties.
+
+3.3 CRPS (Continuous Ranked Probability Score)
+    - Evaluates the difference between the predicted cumulative distribution function (CDF) and the empirical observation CDF.
+    - Essential objective when training distribution-aware generative/diffusion architectures.
+
+3.4 Frequency / Spectral Domain Loss
+    - Loss_total = MSE(y, y_hat) + lambda * || FFT(y) - FFT(y_hat) ||_1
+    - Directly penalizes spectral errors, preserving sharp oscillations, peaks, and periodic harmonics.
+
+================================================================================
+4. TIME SERIES FOUNDATION MODELS (TSFMs)
+================================================================================
+
+Pre-trained foundation models trained on massive time series corpora enabling zero-shot forecasting:
+
+4.1 Chronos (Amazon AWS Research)
+    - Architecture: T5 encoder-decoder treating time series as a language modeling problem via tokenization and binning of continuous values.
+    - Strengths: High-quality probabilistic output and strong zero-shot baselines across standard benchmarks.
+
+4.2 TimesFM (Google Research)
+    - Architecture: Decoder-only Transformer trained on 100B+ real/synthetic time points using continuous patch embeddings.
+    - Strengths: Fast autoregressive rollout with support for covariates and quantile forecasting heads.
+
+4.3 MOIRAI / MOIRAI-MoE (Salesforce Research)
+    - Architecture: Any-variate attention architecture with Mixture of Experts (MoE).
+    - Strengths: Natively handles any number of multivariate channels, sampling rates, and forecast horizons.
+
+4.4 MOMENT (CMU / Databricks)
+    - Architecture: Open-source foundation model family trained on the "Time-series Pile".
+    - Strengths: Multi-task capability covering forecasting, anomaly detection, imputation, and classification.
+
+================================================================================
+5. PHYSICS-INFORMED & RESIDUAL HYBRID MODELING
+================================================================================
+
+For physical, dynamical, or orbital systems (e.g., satellite ephemeris, telemetry, navigation):
+
+                +-------------------------------------------------+
+Raw History --> | Analytical / Physics Model (Nominal Kinematics) | ---> Nominal Orbit / State
+     |          +-------------------------------------------------+               |
+     |                                                                            | (+)
+     v                                                                            v
+[ True - Nominal ] ---> [ Neural Network (BiLSTM / PatchTST / Diffusion) ] ---> Predicted Residual
+                                                                                  |
+                                                                                  v
+                                                                       Final Accurate Forecast
+
+Why Residual Learning Outperforms Pure Black-Box ML:
+1. Analytical/Physics baselines (e.g., Keplerian orbit propagation, kinematics) model the vast majority of deterministic variance.
+2. The neural network only needs to learn small, non-conservative perturbations (e.g., solar radiation pressure, gravitational harmonics, atmospheric drag, sensor drift).
+3. Guarantees physical plausibility and prevents catastrophic divergence outside the training distribution.
+
+================================================================================
+6. UNCERTAINTY QUANTIFICATION & VALIDATION RIGOR
+================================================================================
+
+6.1 Conformal Prediction for Time Series (EnbPI / Adaptive CI)
+    - Provides distribution-free, finite-sample theoretical guarantees (e.g., valid 95% prediction intervals) without making Gaussian or linearity assumptions.
+    - Adjusts non-conformity scores online to adapt to non-stationary volatility changes.
+
+6.2 Time-Series Cross Validation Strategy
+    - Never use randomized K-Fold cross-validation (causes severe future-leakage).
+    - Use Expanding Window (Walk-Forward) validation or Purged & Embargoed TimeSeriesSplit to account for temporal auto-correlation and prevent lookahead bias.
+
+================================================================================
+7. PRACTICAL ENGINEERING ROADMAP & PRIORITIZED CHECKLIST
+================================================================================
+
+Step 1: Normalization & Stationarity (Immediate 15-30% gain)
+        [ ] Implement RevIN (Reversible Instance Normalization) around your neural model.
+        [ ] Check for trend stationarity; test first-order differencing if drift is present.
+
+Step 2: Objective & Loss Function Refinement
+        [ ] If predictions lag behind actual values, replace pure MSE with DILATE or add a Spectral/FFT loss term.
+        [ ] For uncertainty, output quantiles (p10, p50, p90) or train a diffusion denoiser.
+
+Step 3: Architecture Exploration
+        [ ] Benchmark a lightweight MLP baseline (DLinear / TimeMixer).
+        [ ] Benchmark a patched Transformer (PatchTST) with Channel Independence.
+        [ ] Benchmark an Inverted Transformer (iTransformer) if cross-channel interactions are critical.
+
+Step 4: Residual / Domain Hybridization
+        [ ] If domain physics or an analytical model exists, subtract the nominal state and train the ML model strictly on the residual error.
+
+Step 5: Rigorous Evaluation
+        [ ] Evaluate using Walk-Forward temporal splits.
+        [ ] Compute both Point Metrics (MAE, RMSE, MAPE) and Temporal Alignment Metrics (Dynamic Time Warping distance, Phase error, CRPS).
+================================================================================

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "required_baselines": [
+    "zero_correction",
+    "persistence",
+    "seasonal_naive_96",
+    "drift"
+  ],
+  "required_slices": [
+    "forecast_horizon",
+    "satellite",
+    "constellation",
+    "normal_vs_event_regime"
+  ],
+  "point_forecast_gate": {
+    "metric": "MAE per physical target unit",
+    "minimum_relative_skill": 0.0,
+    "must_beat_strongest_baseline_at_every_required_horizon": true,
+    "confidence_interval": "paired block bootstrap by forecast origin/day and satellite"
+  },
+  "probabilistic_gate": {
+    "required_metrics": ["NLL", "CRPS", "coverage", "mean_interval_width"],
+    "nominal_coverages": [0.8, 0.9, 0.95],
+    "maximum_absolute_coverage_error": 0.05
+  },
+  "coverage_gate": {
+    "report_all_test_satellites": true,
+    "report_missing_label_coverage": true,
+    "allow_future_target_based_exclusion": false
+  },
+  "operational_gate": {
+    "require_declared_forecast_issue_time": true,
+    "require_declared_input_product_latency": true,
+    "require_latency_and_memory_budget": true
+  },
+  "status": "blocked_for_scientific_claims_until_upstream_orbit_alignment_is_rebuilt_and_multiple_future_test_days_are_available"
+}

@@ -6,7 +6,7 @@ Incorporates Residual Skip Anchor, Attention Context Pooling, and LayerNorm.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_5
+from src.config import SEQ_LEN, FORECAST_HORIZON, TARGET_COLS_4
 
 
 class BiLSTMGRUPyTorchModel(nn.Module):
@@ -26,7 +26,9 @@ class BiLSTMGRUPyTorchModel(nn.Module):
     def __init__(
         self,
         seq_len: int = SEQ_LEN,
-        n_features: int = len(TARGET_COLS_5),
+        n_features: int = len(TARGET_COLS_4),
+        output_dim: int | None = None,
+        target_feature_indices: tuple[int, ...] | None = None,
         forecast_horizon: int = FORECAST_HORIZON,
         bilstm_units: int = 64,
         gru_units: int = 64,
@@ -36,6 +38,14 @@ class BiLSTMGRUPyTorchModel(nn.Module):
         super().__init__()
         self.seq_len = seq_len
         self.n_features = n_features
+        self.output_dim = output_dim if output_dim is not None else n_features
+        self.target_feature_indices = (
+            tuple(range(self.output_dim))
+            if target_feature_indices is None
+            else tuple(target_feature_indices)
+        )
+        if len(self.target_feature_indices) != self.output_dim:
+            raise ValueError("target_feature_indices must have one index per output")
         self.forecast_horizon = forecast_horizon
 
         # Bidirectional LSTM: outputs (B, seq_len, 2 * bilstm_units)
@@ -71,7 +81,7 @@ class BiLSTMGRUPyTorchModel(nn.Module):
             nn.Dropout(dropout_2),
             nn.Linear(128, 128),
             nn.GELU(),
-            nn.Linear(128, forecast_horizon * n_features)
+            nn.Linear(128, forecast_horizon * self.output_dim)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -95,10 +105,10 @@ class BiLSTMGRUPyTorchModel(nn.Module):
 
         # Direct multi-step delta/residual prediction
         delta = self.dense_proj(combined)
-        delta = delta.view(-1, self.forecast_horizon, self.n_features)
+        delta = delta.view(-1, self.forecast_horizon, self.output_dim)
 
         # Residual Skip Anchor: prediction is offset relative to last observed timestep
-        last_obs = x[:, -1:, :]  # (B, 1, n_features)
+        last_obs = x[:, -1:, list(self.target_feature_indices)]
         out = last_obs + delta
 
         return out

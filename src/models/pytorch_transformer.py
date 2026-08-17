@@ -67,6 +67,51 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, : x.size(1)]
 
 
+class RevIN(nn.Module):
+    """
+    Reversible Instance Normalization (RevIN) for Non-Stationary Time Series.
+    Symmetrically removes instance-specific mean and variance from the input lookback window
+    and restores them at the output forecast horizon to combat distribution shift.
+    """
+    def __init__(self, num_features: int, eps: float = 1e-5, affine: bool = True):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.affine = affine
+        if self.affine:
+            self.affine_weight = nn.Parameter(torch.ones(num_features))
+            self.affine_bias = nn.Parameter(torch.zeros(num_features))
+
+    def forward(self, x: torch.Tensor, mode: str) -> torch.Tensor:
+        if mode == "norm":
+            self.mean = torch.mean(x, dim=1, keepdim=True).detach()
+            self.stdev = torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + self.eps).detach()
+            x_norm = (x - self.mean) / self.stdev
+            if self.affine:
+                x_norm = x_norm * self.affine_weight + self.affine_bias
+            return x_norm
+        elif mode == "denorm":
+            x_denorm = x
+            if self.affine:
+                safe_weight = torch.where(
+                    self.affine_weight.abs() < self.eps,
+                    self.affine_weight.sign() * self.eps + (self.affine_weight == 0) * self.eps,
+                    self.affine_weight,
+                )
+                x_denorm = (x_denorm - self.affine_bias) / safe_weight
+            x_denorm = x_denorm * self.stdev + self.mean
+            return x_denorm
+        elif mode == "denorm_sigma":
+            # y = (z - bias) / weight * stdev + mean, so scale must undo
+            # both the learned affine transform and instance standardization.
+            if self.affine:
+                affine_scale = self.affine_weight.abs().clamp_min(self.eps)
+                x = x / affine_scale
+            return x * self.stdev
+        else:
+            raise NotImplementedError(f"RevIN mode '{mode}' is not supported.")
+
+
 class BiLSTMGRUMHSABackbone(nn.Module):
     """
     Unified Hybrid Encoder:
@@ -84,6 +129,7 @@ class BiLSTMGRUMHSABackbone(nn.Module):
         bilstm_units: int = 48,
         gru_units: int = 48,
         nhead: int = 4,
+        num_layers: int = 1,
         dropout: float = 0.1
     ):
         super().__init__()
@@ -121,9 +167,38 @@ class BiLSTMGRUMHSABackbone(nn.Module):
             dropout=dropout
         )
         self.mhsa_norm = nn.LayerNorm(gru_units)
+        self.mhsa_ffn = nn.Sequential(
+            nn.Linear(gru_units, gru_units * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(gru_units * 4, gru_units),
+        )
+        self.mhsa_ffn_norm = nn.LayerNorm(gru_units)
+
+        # Keep the original attention layer names for checkpoint compatibility and
+        # make the advertised num_layers parameter real for all additional blocks.
+        self.attention_layers = nn.ModuleList()
+        for _ in range(max(1, num_layers) - 1):
+            self.attention_layers.append(nn.ModuleDict({
+                "attention": nn.MultiheadAttention(
+                    embed_dim=gru_units,
+                    num_heads=nhead,
+                    batch_first=True,
+                    dropout=dropout,
+                ),
+                "norm1": nn.LayerNorm(gru_units),
+                "ffn": nn.Sequential(
+                    nn.Linear(gru_units, gru_units * 4),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(gru_units * 4, gru_units),
+                ),
+                "norm2": nn.LayerNorm(gru_units),
+            }))
 
         # Context Synthesizer Dimension: h_gru (gru_units) + mhsa_pool (gru_units) + E_prn (de)
         self.context_dim = gru_units * 2 + self.de
+        self.seq_feature_dim = gru_units
 
     def forward(self, x: torch.Tensor, sat_ids: torch.Tensor) -> tuple:
         # x: (B, seq_len, num_features)
@@ -153,6 +228,11 @@ class BiLSTMGRUMHSABackbone(nn.Module):
         # MHSA over GRU temporal sequence
         mhsa_out, _ = self.mhsa(gru_seq, gru_seq, gru_seq)
         mhsa_seq = self.mhsa_norm(gru_seq + mhsa_out)
+        mhsa_seq = self.mhsa_ffn_norm(mhsa_seq + self.mhsa_ffn(mhsa_seq))
+        for block in self.attention_layers:
+            attention_out, _ = block["attention"](mhsa_seq, mhsa_seq, mhsa_seq)
+            mhsa_seq = block["norm1"](mhsa_seq + attention_out)
+            mhsa_seq = block["norm2"](mhsa_seq + block["ffn"](mhsa_seq))
         mhsa_pooled = torch.mean(mhsa_seq, dim=1)  # (B, gru_units)
 
         # Synthesized Global Context Vector: c = [h_GRU; MHSA(H); E_PRN]
@@ -163,29 +243,54 @@ class BiLSTMGRUMHSABackbone(nn.Module):
 
 class ProbabilisticGaussianHead(nn.Module):
     """
-    Task Head 1: Gaussian Parameter Regression Head predicting conditional mean (mu)
-    and variance (sigma^2 = softplus(W_sigma * h + b_sigma) + epsilon).
+    Task Head 1: Sequence-Preserving Temporal Projection Gaussian Head.
+    Combines sequence tokens (B, L, D) and global context c to generate multi-horizon forecasts
+    without flattening sequence dimensions.
     """
-    def __init__(self, context_dim: int, forecast_horizon: int = FORECAST_HORIZON, output_dim: int = len(TARGET_COLS_4)):
+    def __init__(
+        self,
+        seq_feature_dim: int,
+        context_dim: int,
+        seq_len: int = SEQ_LEN,
+        forecast_horizon: int = FORECAST_HORIZON,
+        output_dim: int = len(TARGET_COLS_4)
+    ):
         super().__init__()
+        self.seq_len = seq_len
         self.forecast_horizon = forecast_horizon
         self.output_dim = output_dim
-        self.net = nn.Sequential(
-            nn.LayerNorm(context_dim),
-            nn.Linear(context_dim, 128),
+
+        # Temporal dimension mapping from lookback seq_len to forecast_horizon
+        self.temporal_map = nn.Linear(seq_len, forecast_horizon)
+
+        # Global context conditioner
+        self.context_proj = nn.Linear(context_dim, seq_feature_dim)
+
+        # Output feature projection
+        self.feat_norm = nn.LayerNorm(seq_feature_dim)
+        self.proj_net = nn.Sequential(
+            nn.Linear(seq_feature_dim, 128),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(128, 128),
-            nn.GELU(),
-            nn.Linear(128, forecast_horizon * output_dim * 2)
+            nn.Linear(128, output_dim * 2)
         )
 
-    def forward(self, context: torch.Tensor) -> tuple:
-        out = self.net(context)
-        out = out.view(-1, self.forecast_horizon, self.output_dim * 2)
+    def forward(self, mhsa_seq: torch.Tensor, context: torch.Tensor) -> tuple:
+        # mhsa_seq: (B, seq_len, seq_feature_dim)
+        # context: (B, context_dim)
+        c_mod = self.context_proj(context).unsqueeze(1)  # (B, 1, seq_feature_dim)
+        h_seq = mhsa_seq + c_mod  # Inject global conditioning
+
+        # Transpose to project temporal dimension: (B, seq_feature_dim, seq_len) -> (B, seq_feature_dim, horizon)
+        h_seq_t = h_seq.transpose(1, 2)
+        h_proj_t = self.temporal_map(h_seq_t)
+        h_future = h_proj_t.transpose(1, 2)  # (B, forecast_horizon, seq_feature_dim)
+
+        h_norm = self.feat_norm(h_future)
+        out = self.proj_net(h_norm)  # (B, forecast_horizon, output_dim * 2)
+
         mu_delta = out[:, :, : self.output_dim]
-        # strictly positive variance via softplus + epsilon
-        sigma = F.softplus(out[:, :, self.output_dim :]) + 0.05
+        sigma = F.softplus(out[:, :, self.output_dim :]) + 1e-4
         return mu_delta, sigma
 
 
@@ -193,6 +298,7 @@ class AnomalySpikeBCEHead(nn.Module):
     """
     Task Head 2: Supervised Binary Event Classification Head for thruster burns,
     solar radiation pressure bursts, and atomic clock step-jumps.
+    Outputs raw logits for numerically stable AMP-compatible BCE computation.
     """
     def __init__(self, context_dim: int, forecast_horizon: int = FORECAST_HORIZON):
         super().__init__()
@@ -202,8 +308,7 @@ class AnomalySpikeBCEHead(nn.Module):
             nn.Linear(context_dim, 64),
             nn.GELU(),
             nn.Dropout(0.1),
-            nn.Linear(64, forecast_horizon),
-            nn.Sigmoid()
+            nn.Linear(64, forecast_horizon)
         )
 
     def forward(self, context: torch.Tensor) -> torch.Tensor:
@@ -214,10 +319,11 @@ class GNSSForecaster(nn.Module):
     """
     Complete End-to-End Deep Hybrid Architecture for GNSS Orbit & Clock Prediction.
     Integrates:
+    - RevIN (Reversible Instance Normalization) for Non-Stationary Shift
     - BiLSTM-GRU-MHSA Encoder Backbone
     - Learnable PRN Entity Embeddings
     - Time2Vec Cyclical & Secular Encodings
-    - Probabilistic Gaussian Parameter Regression Head (mu, sigma)
+    - Sequence-Preserving Temporal Projection Gaussian Head (mu, sigma)
     - Binary Cross-Entropy Anomaly/Spike Head
     - Physics-Informed Two-Stage Residual Anchor
     """
@@ -229,13 +335,34 @@ class GNSSForecaster(nn.Module):
         bilstm_units: int = 48,
         gru_units: int = 48,
         nhead: int = 4,
+        num_layers: int = 1,
+        seq_len: int = SEQ_LEN,
         forecast_horizon: int = FORECAST_HORIZON,
         output_dim: int = len(TARGET_COLS_4),
+        target_feature_indices: tuple[int, ...] | None = None,
+        use_revin: bool = True,
+        enable_event_head: bool = False,
         dropout: float = 0.1
     ):
         super().__init__()
+        self.seq_len = seq_len
         self.forecast_horizon = forecast_horizon
         self.output_dim = output_dim
+        self.target_feature_indices = (
+            tuple(range(output_dim))
+            if target_feature_indices is None
+            else tuple(target_feature_indices)
+        )
+        if len(self.target_feature_indices) != output_dim:
+            raise ValueError("target_feature_indices must have one index per output")
+        if min(self.target_feature_indices) < 0 or max(self.target_feature_indices) >= num_features:
+            raise ValueError("target_feature_indices contains an out-of-range feature index")
+        self.use_revin = use_revin
+        self.enable_event_head = enable_event_head
+
+        # RevIN layer applied to target channels
+        if self.use_revin:
+            self.revin = RevIN(num_features=output_dim, affine=True)
 
         self.backbone = BiLSTMGRUMHSABackbone(
             num_features=num_features,
@@ -244,31 +371,54 @@ class GNSSForecaster(nn.Module):
             bilstm_units=bilstm_units,
             gru_units=gru_units,
             nhead=nhead,
+            num_layers=num_layers,
             dropout=dropout
         )
 
         context_dim = self.backbone.context_dim
+        seq_feature_dim = self.backbone.seq_feature_dim
+
         self.prob_head = ProbabilisticGaussianHead(
+            seq_feature_dim=seq_feature_dim,
             context_dim=context_dim,
+            seq_len=seq_len,
             forecast_horizon=forecast_horizon,
             output_dim=output_dim
         )
-        self.spike_head = AnomalySpikeBCEHead(
-            context_dim=context_dim,
-            forecast_horizon=forecast_horizon
+        self.spike_head = (
+            AnomalySpikeBCEHead(context_dim=context_dim, forecast_horizon=forecast_horizon)
+            if enable_event_head
+            else None
         )
 
     def forward(self, x: torch.Tensor, sat_ids: torch.Tensor) -> tuple:
-        mhsa_seq, context = self.backbone(x, sat_ids)
+        # If RevIN is active, normalize target variates within x
+        x_processed = x.clone()
+        target_indices = list(self.target_feature_indices)
+        if self.use_revin:
+            target_slice = x[:, :, target_indices]
+            x_norm = self.revin(target_slice, mode="norm")
+            x_processed[:, :, target_indices] = x_norm
+
+        mhsa_seq, context = self.backbone(x_processed, sat_ids)
 
         # 1. Anomaly spike probabilities
-        spike_probs = self.spike_head(context)
+        spike_probs = (
+            self.spike_head(context)
+            if self.spike_head is not None
+            else context.new_zeros((context.shape[0], self.forecast_horizon))
+        )
 
-        # 2. Gaussian parameter predictions (mu_delta, sigma)
-        mu_delta, sigma = self.prob_head(context)
+        # 2. Sequence-preserving Gaussian parameter predictions (mu_delta, sigma)
+        mu_delta, sigma = self.prob_head(mhsa_seq, context)
 
-        # Two-stage physics separation: offset predictions relative to last known observation
-        last_obs = x[:, -1:, : self.output_dim]  # (B, 1, output_dim)
+        # Two-stage physics separation: offset relative to last observation in normalized space
+        last_obs = x_processed[:, -1:, target_indices]
         mu = last_obs + mu_delta
+
+        # Denormalize with RevIN back to original target distribution scale
+        if self.use_revin:
+            mu = self.revin(mu, mode="denorm")
+            sigma = self.revin(sigma, mode="denorm_sigma")
 
         return mu, sigma, spike_probs, context
