@@ -38,10 +38,10 @@ def plot_training_history(history_dict: dict, save_path: str, title: str = "Trai
         axes[1].set_xlabel("Epoch")
         axes[1].legend()
         axes[1].grid(alpha=0.3)
-    elif "sigma_mean" in history_dict:
-        axes[1].plot(history_dict["sigma_mean"], label="Mean Sigma", color="#2E7D32", lw=1.8)
-        axes[1].plot(history_dict.get("spike_mean", []), label="Mean Spike Prob", color="#FF8F00", lw=1.8)
-        axes[1].set_title("Uncertainty & Spike Parameters")
+    elif "sigma_mean" in history_dict or "scale_mean" in history_dict:
+        values = history_dict.get("scale_mean", history_dict.get("sigma_mean", []))
+        axes[1].plot(values, label="Mean predictive scale", color="#2E7D32", lw=1.8)
+        axes[1].set_title("Predictive Scale")
         axes[1].set_xlabel("Epoch")
         axes[1].legend()
         axes[1].grid(alpha=0.3)
@@ -85,7 +85,8 @@ def plot_prediction_vs_actual(
             ci = target_cols.index(col_name)
             act = all_actuals[sat][:, ci]
             prd = all_preds[sat][:, ci]
-            mae = float(np.mean(np.abs(act - prd)))
+            valid = np.isfinite(act) & np.isfinite(prd)
+            mae = float(np.mean(np.abs(act[valid] - prd[valid]))) if valid.any() else float("nan")
 
             ax.plot(act, color="#1565C0", lw=1.5, label="Actual Ground Truth")
             ax.plot(prd, color="#E53935", lw=1.5, ls="--", label="Forecasted Model")
@@ -172,6 +173,10 @@ def plot_residual_distributions(
             all_actuals[s][:, i] - all_preds[s][:, i]
             for s in all_preds
         ])
+        resids = resids[np.isfinite(resids)]
+        if resids.size == 0:
+            ax.set_title(f"{col_labels[i]} (no valid labels)", fontsize=10)
+            continue
         mu, sig = resids.mean(), resids.std()
         ax.hist(resids, bins=60, color="#5C6BC0", edgecolor="white", alpha=0.82, density=True)
         if sig > 1e-8:
@@ -218,7 +223,7 @@ def plot_per_satellite_mae(
         (axes[1], clock_maes, "Clock Error MAE (s)", "s")
     ]:
         ax.bar(sat_ids, vals, color=bar_colors, edgecolor="white", lw=0.5)
-        mean_val = np.mean(vals)
+        mean_val = np.nanmean(vals)
         ax.axhline(mean_val, color="black", lw=1.5, ls="--")
         ax.set_title(title, fontsize=11)
         ax.set_xticks(range(len(sat_ids)))
@@ -289,8 +294,17 @@ def plot_frequency_spectrum(
     Compares FFT spectral power density of ground truth vs predicted forecasts.
     """
     os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-    act_fft = np.abs(np.fft.rfft(actual[:, feature_idx]))
-    pred_fft = np.abs(np.fft.rfft(predicted[:, feature_idx]))
+    actual_series = np.asarray(actual[:, feature_idx], dtype=float)
+    predicted_series = np.asarray(predicted[:, feature_idx], dtype=float)
+    valid = np.isfinite(actual_series) & np.isfinite(predicted_series)
+    if not valid.all():
+        indices = np.arange(len(actual_series))
+        if valid.sum() < 2:
+            return
+        actual_series = np.interp(indices, indices[valid], actual_series[valid])
+        predicted_series = np.interp(indices, indices[valid], predicted_series[valid])
+    act_fft = np.abs(np.fft.rfft(actual_series))
+    pred_fft = np.abs(np.fft.rfft(predicted_series))
 
     plt.figure(figsize=(12, 4.5))
     plt.plot(act_fft, label="Actual Spectrum", color="black", lw=2)

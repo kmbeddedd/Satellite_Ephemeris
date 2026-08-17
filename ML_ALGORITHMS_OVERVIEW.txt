@@ -1,0 +1,45 @@
+================================================================================
+          MACHINE LEARNING ALGORITHMS USED IN THIS PROJECT
+================================================================================
+
+1. Bidirectional Long Short-Term Memory (BiLSTM)
+   - Category: Recurrent Deep Learning / Time-Series Forecasting
+   - Description: Processes past 24-hour telemetry sequences in forward and backward
+     directions to learn orbital dynamics, gravity perturbations, and secular drift.
+
+2. Gated Recurrent Unit (GRU)
+   - Category: Recurrent Deep Learning / Temporal Compression
+   - Description: Compresses bidirectional sequence representations into a compact
+     latent context vector using reset and update gating mechanisms.
+
+3. Multi-Head Self-Attention (Transformer Encoder)
+   - Category: Attention-Based Deep Learning / Sequence Modeling
+   - Description: Models complex long-range temporal correlations across lookback
+     timesteps using scaled dot-product attention heads.
+
+4. Entity Embedding (Representation Learning)
+   - Category: Embedding / Feature Representation
+   - Description: Maps discrete Satellite PRN IDs (GPS and GLONASS) into continuous
+     latent vectors to capture satellite-specific orbital and atomic clock traits.
+
+5. Gaussian Parameter Regression (Probabilistic Deep Learning)
+   - Category: Uncertainty Quantification / Density Forecasting
+   - Description: Projects decoder states to predict predictive mean (mu) and variance
+     (sigma) parameters optimized with Gaussian Negative Log-Likelihood (NLL).
+
+6. Binary Cross-Entropy Classifier (Anomaly / Spike Detection)
+   - Category: Supervised Binary Classification
+   - Description: Identifies anomalous orbital maneuvers, solar radiation pressure
+     bursts, and atomic clock step-jumps.
+
+7. Conditional Denoising Diffusion Probabilistic Model (DDPM)
+   - Category: Generative Deep Learning / Diffusion Models
+   - Description: A 100-step reverse diffusion denoiser conditioned on global context
+     to generate multi-sample stochastic future trajectories.
+
+8. Tree-structured Parzen Estimator (TPE - Optuna)
+   - Category: Bayesian Optimization / AutoML
+   - Description: Sequential Model-Based Optimization to find optimal neural network
+     hyperparameters (layer units, dropout rates, learning rates, batch sizes).
+
+================================================================================

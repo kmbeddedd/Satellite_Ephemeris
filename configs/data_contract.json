@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "time": {
+    "timestamp_column": "Timestamp",
+    "timezone": "GNSS product time system; conversion to UTC must be recorded upstream",
+    "cadence_minutes": 15,
+    "lookback_steps": 96,
+    "forecast_steps": 96
+  },
+  "entity": {
+    "column": "Satellite_ID",
+    "constellation_column": "Constellation",
+    "allowed_prefixes": ["G", "R"]
+  },
+  "required_columns": [
+    "Timestamp",
+    "Satellite_ID",
+    "Constellation",
+    "Broadcast_X",
+    "Broadcast_Y",
+    "Broadcast_Z",
+    "Broadcast_Clock",
+    "Modelled_X",
+    "Modelled_Y",
+    "Modelled_Z",
+    "Modelled_Clock",
+    "Error_X",
+    "Error_Y",
+    "Error_Z",
+    "3D_Orbit_Error",
+    "Error_Clock"
+  ],
+  "units": {
+    "Broadcast_X": "metre",
+    "Broadcast_Y": "metre",
+    "Broadcast_Z": "metre",
+    "Modelled_X": "metre",
+    "Modelled_Y": "metre",
+    "Modelled_Z": "metre",
+    "Broadcast_Clock": "second",
+    "Modelled_Clock": "second",
+    "Error_X": "metre",
+    "Error_Y": "metre",
+    "Error_Z": "metre",
+    "Error_Clock": "second"
+  },
+  "missing_values": {
+    "sp3_clock_sentinel_microseconds": 999999.999999,
+    "converted_clock_sentinel_seconds": 0.999999999999,
+    "policy": "mark clock label unavailable; never coerce or train it as a physical clock value"
+  },
+  "window_policy": {
+    "require_exact_cadence": true,
+    "allow_cross_satellite_windows": false,
+    "allow_target_based_row_filtering": false,
+    "require_label_availability_mask": true
+  },
+  "split_policy": {
+    "method": "chronological rolling origin",
+    "scaler_fit": "fold training rows only",
+    "validation_target_overlap": false,
+    "test_target_overlap": false,
+    "minimum_target_embargo_steps": 96
+  },
+  "provenance_required": [
+    "source_product_urls",
+    "download_times",
+    "product_latency",
+    "SP3_and_RINEX_versions",
+    "time_system_conversion",
+    "antenna_reference",
+    "interpolation_method",
+    "source_file_hashes"
+  ]
+}

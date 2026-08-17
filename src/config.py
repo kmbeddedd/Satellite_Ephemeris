@@ -14,12 +14,17 @@ TOTAL_TIMESTEPS_PER_SAT = 768            # 8 days * 96 steps/day (15-min interva
 SEQ_LEN = 96                            # Lookback window = 24 hours (96 steps)
 FORECAST_HORIZON = 96                   # Direct multi-step prediction = 24 hours (96 steps)
 
-# Data Cleaning Thresholds
-OUTLIER_THRESHOLD_3D = 50_000.0         # 3D Orbit error filter threshold (metres)
-SPIKE_THRESHOLD = 1.5                   # Standard deviations threshold for spike event detection
+# Data diagnostics. Large targets are reported but never filtered using future truth.
+OUTLIER_THRESHOLD_3D = 50_000.0
+# Retained only for the backward-compatible SPIKE arrays. Pseudo-events derived
+# from target magnitude are not used by either corrected trainer.
+SPIKE_THRESHOLD = 1.5
+SP3_CLOCK_SENTINEL_SECONDS = 0.999999999999
+EXPECTED_CADENCE_MINUTES = 15
 
 # Target Variables
-# Standard 5-target set (used in Keras BiLSTM)
+# Deprecated compatibility schema. 3D_Orbit_Error is deterministic and must not
+# be learned independently; corrected trainers use TARGET_COLS_4 and derive 3D.
 TARGET_COLS_5 = [
     "Error_X",
     "Error_Y",
