@@ -5,7 +5,7 @@ Global Configuration and Constants for GNSS Orbit & Clock Forecasting
 import os
 
 # Default Paths
-DEFAULT_DATA_PATH = "FINAL_Data.csv"
+DEFAULT_DATA_PATH = "data_acquisition/CLEAN_GNSS_BENCHMARK.csv"
 DEFAULT_OUTPUT_DIR = "./gnss_results"
 
 # Temporal Specifications
@@ -68,19 +68,6 @@ HORIZON_MAP = {
 
 # Model Hyperparameter Defaults
 DEFAULT_SEED = 42
-
-# BiLSTM + GRU Defaults (TensorFlow/Keras)
-KERAS_DEFAULTS = {
-    "epochs": 60,
-    "batch_size": 64,
-    "bilstm_units": 32,
-    "gru_units": 64,
-    "dropout_1": 0.3,
-    "dropout_2": 0.11,
-    "learning_rate": 1.56e-3,
-    "early_stopping_patience": 8,
-    "reduce_lr_patience": 4
-}
 
 # Transformer Defaults (PyTorch)
 TRANSFORMER_DEFAULTS = {

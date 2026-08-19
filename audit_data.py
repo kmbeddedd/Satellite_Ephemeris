@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.artifacts import sha256_file, write_json
+from src.config import DEFAULT_DATA_PATH
 
 
 def audit_csv(data_path: str, contract_path: str = "configs/data_contract.json") -> dict:
@@ -110,7 +111,7 @@ def audit_csv(data_path: str, contract_path: str = "configs/data_contract.json")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit a GNSS CSV against its data contract")
-    parser.add_argument("--data", default="FINAL_Data.csv")
+    parser.add_argument("--data", default=DEFAULT_DATA_PATH)
     parser.add_argument("--contract", default="configs/data_contract.json")
     parser.add_argument("--report", default="data_quality_report.json")
     parser.add_argument("--strict", action="store_true", help="Exit non-zero on a critical failure")

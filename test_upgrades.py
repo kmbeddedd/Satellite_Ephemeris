@@ -1,4 +1,5 @@
 import torch
+from src.config import DEFAULT_DATA_PATH
 from src.data import prepare_pytorch_datasets
 from src.models.pytorch_transformer import GNSSForecaster
 from src.models.losses import composite_transformer_loss, dilate_loss
@@ -9,7 +10,7 @@ print("RUNNING VERIFICATION OF SOTA UPGRADES")
 print("=" * 60)
 
 print("1. Testing data loading and temporal split...")
-data = prepare_pytorch_datasets("FINAL_Data.csv", input_window=96, forecast_horizon=96, batch_size=16)
+data = prepare_pytorch_datasets(DEFAULT_DATA_PATH, input_window=96, forecast_horizon=96, batch_size=16)
 print(f"   X_train: {data['X_train'].shape}, X_val: {data['X_val'].shape}, X_test: {data['X_test'].shape}")
 assert len(data['X_train']) > 0 and len(data['X_test']) > 0
 print("   [PASSED] Temporal dataset partitioning verified.")

@@ -1,0 +1,24 @@
+{
+  "critical_failures": [],
+  "data_path": "D:\\Education\\Project\\Satellite ML\\data_acquisition\\CLEAN_GNSS_BENCHMARK.csv",
+  "duplicate_satellite_timestamps": 0,
+  "end": "2026-08-08T23:45:00",
+  "invalid_timestamps": 0,
+  "mean_event_indicator_lag5_correlation": null,
+  "non_cadence_intervals": 0,
+  "non_finite_required_values": 0,
+  "norm_identity_max_abs_error_m": 1.3322676295501878e-15,
+  "orbit_error_at_least_1km_fraction": 0.0,
+  "passed": true,
+  "policy": {
+    "orbit_alignment_must_be_rebuilt_before_scientific_promotion": false,
+    "sentinel_rows_must_be_masked": true,
+    "target_magnitude_rows_must_not_be_deleted": true
+  },
+  "rows": 10752,
+  "satellites": 14,
+  "sha256": "e27cf820123f12f11ab17dd40888de5c5fe78e2a9702cca4f4971e2245099cf7",
+  "sp3_missing_clock_sentinel_rows": 0,
+  "start": "2026-08-01T00:00:00",
+  "synchronous_95pct_1km_epochs": 0
+}
