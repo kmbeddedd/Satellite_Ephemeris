@@ -1,0 +1,25 @@
+https://sih.gov.in/sih2025PS
+
+Problem Statement Title	
+To develop AI/ML based models to predict time-varying patterns of the error build up between uploaded and modelled values of both satellite clock and ephemeris parameters of navigation satellites
+Description	
+
+Background
+The accuracy of Global Navigation Satellite Systems (GNSS) is fundamentally limited by errors in satellite clock biases and ephemeris (satellite orbit) predictions. These errors, if not accurately modeled and predicted, can lead to significant deviations in positioning and timing solutions. This challenge tasks participants with developing and applying generative Artificial Intelligence (AI) and Machine Learning (ML) methods to model and predict the differences between uploaded (broadcast) and ICD based modelled values. The goal is to produce highly accurate error predictions for future time intervals, enhancing the reliability and precision of GNSS applications.
+
+Detailed Description
+Participants will be provided with a seven-day dataset containing recorded clock and ephemeris errors between uploaded and modeled values from GNSS satellites in both GEO/GSO and MEO. The models must be capable of predicting these errors at 15-minute intervals for an eighth day that is not included in the training data. Evaluation will focus on the accuracy of these predictions over various validity periods: 15 minutes, 30 minutes, 1 hour, 2 hours, and up to 24 hours into the future from the last known data point. Competitors are encouraged to explore a wide range of generative AI/ML techniques, including but not limited to:
+Recurrent Neural Networks (RNNs), such as Long Short-Term Memory (LSTM) and Gated Recurrent Units (GRUs), for time-series forecasting.
+Generative Adversarial Networks (GANs) for synthesizing realistic error patterns.
+Transformers for capturing long-range dependencies in the data.
+Gaussian Processes for probabilistic modeling of errors.
+
+Expected Solution
+• Successful models will demonstrate robust performance across all prediction horizons and provide insights into the underlying dynamics of GNSS errors.
+• The error distribution from the proposed model will be evaluated in terms of closeness to the normal distribution. Closer the error distribution to the normal distribution, better will be the performance.
+Organization	Indian Space Research Organisation (ISRO)
+Department	Department of Space(DoS)
+Category	Software
+Theme	Space Technology
+Youtube Link	
+Dataset Link	https://www.sac.gov.in/sih2025

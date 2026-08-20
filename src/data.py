@@ -202,7 +202,14 @@ def load_and_clean_data(
             f"{report['irregular_by_satellite']}"
         )
 
-    split_time = pd.Timestamp(train_end_date)
+    # Auto-adjust split_time to Day 1-7 Train, Day 8 Test if train_end_date is outside the dataset span
+    min_t, max_t = df["Timestamp"].min(), df["Timestamp"].max()
+    configured_split = pd.Timestamp(train_end_date)
+    if configured_split < min_t or configured_split > max_t:
+        split_time = max_t - pd.Timedelta(hours=23, minutes=45)
+    else:
+        split_time = configured_split
+
     train_df = df[df["Timestamp"] < split_time].copy()
     test_df = df[df["Timestamp"] >= split_time].copy()
     if train_df.empty or test_df.empty:
@@ -228,7 +235,10 @@ def load_and_clean_data(
     test_df.attrs["data_contract"] = metadata
     gps = sum(sat.startswith("G") for sat in complete_sats)
     glo = sum(sat.startswith("R") for sat in complete_sats)
-    print(f"  Train-known satellites: {len(complete_sats)} (GPS={gps}, GLONASS={glo})")
+    geo = sum("GEO" in sat for sat in complete_sats)
+    meo = sum("MEO" in sat for sat in complete_sats)
+    type_str = f"GPS={gps}, GLONASS={glo}" if (gps or glo) else f"GEO={geo}, MEO={meo}"
+    print(f"  Train-known satellites: {len(complete_sats)} ({type_str})")
     print(f"  Training records      : {len(train_df):,}")
     print(f"  Testing records       : {len(test_df):,}")
     print(f"  SP3 clock sentinels   : {metadata['sp3_clock_sentinel_rows']:,} (masked)")

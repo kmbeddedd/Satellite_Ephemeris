@@ -1,0 +1,299 @@
+[
+  {
+    "dataset": "DATA_GEO_Train.csv",
+    "orbit_type": "GEO",
+    "num_epochs": 142,
+    "date_start": "2025-09-01 06:00:00",
+    "date_end": "2025-09-07 23:41:00",
+    "lstm_pretrained": {
+      "x_error (m)": {
+        "mae": 4.153696470580122,
+        "rmse": 5.416947494880557,
+        "max_error": 9.652291042428466,
+        "std_error": 5.411782599761933,
+        "shapiro_w": 0.9449239292398464,
+        "shapiro_p_value": 0.16111037446814203,
+        "is_normal": true
+      },
+      "y_error (m)": {
+        "mae": 3.8355269584856098,
+        "rmse": 5.220628332234849,
+        "max_error": 9.100951265759212,
+        "std_error": 5.198741863763226,
+        "shapiro_w": 0.9114226690707187,
+        "shapiro_p_value": 0.02465136114743666,
+        "is_normal": false
+      },
+      "z_error (m)": {
+        "mae": 5.209271730927628,
+        "rmse": 6.940591022107314,
+        "max_error": 12.552316889881709,
+        "std_error": 6.898436912933439,
+        "shapiro_w": 0.9341673578830986,
+        "shapiro_p_value": 0.08749087384045096,
+        "is_normal": true
+      },
+      "satclockerror (m)": {
+        "mae": 2.3132549786983954,
+        "rmse": 3.3352960089378225,
+        "max_error": 6.1871429136505025,
+        "std_error": 3.333865211938169,
+        "shapiro_w": 0.8749634454154414,
+        "shapiro_p_value": 0.0037465263747927862,
+        "is_normal": false
+      },
+      "3d_position_error_mean_m": 8.092653867685543,
+      "3d_position_error_max_m": 18.0492789509268,
+      "3d_position_error_rmse_m": 10.235725869804378
+    },
+    "random_forest": {
+      "x_error (m)": {
+        "mae": 4.4779702018303125,
+        "rmse": 5.651391934954253,
+        "max_error": 11.015050348233551,
+        "std_error": 5.651327213160458,
+        "shapiro_w": 0.9734683342731497,
+        "shapiro_p_value": 0.6951183096083295,
+        "is_normal": true
+      },
+      "y_error (m)": {
+        "mae": 4.178125317732141,
+        "rmse": 5.410104242778725,
+        "max_error": 11.231433340700903,
+        "std_error": 5.355523375557894,
+        "shapiro_w": 0.9623724772708919,
+        "shapiro_p_value": 0.41788445076687786,
+        "is_normal": true
+      },
+      "z_error (m)": {
+        "mae": 5.061429660861409,
+        "rmse": 6.605611647655437,
+        "max_error": 13.556422153514866,
+        "std_error": 6.569876427611436,
+        "shapiro_w": 0.9654976604580631,
+        "shapiro_p_value": 0.4883547604909153,
+        "is_normal": true
+      },
+      "satclockerror (m)": {
+        "mae": 2.684318865772729,
+        "rmse": 3.3395925387362104,
+        "max_error": 6.541632344447801,
+        "std_error": 3.3146800349884336,
+        "shapiro_w": 0.913926845780753,
+        "shapiro_p_value": 0.0282567878501283,
+        "is_normal": false
+      },
+      "3d_position_error_mean_m": 8.479048625874238,
+      "3d_position_error_max_m": 19.333302388025977,
+      "3d_position_error_rmse_m": 10.239216960287516
+    },
+    "day_8_forecast": {
+      "LSTM_x_error (m)": 0.5221406461394509,
+      "LSTM_y_error (m)": 0.3487218198128972,
+      "LSTM_z_error (m)": 0.37498328974265327,
+      "LSTM_satclockerror (m)": -0.04616761464089798,
+      "RF_x_error (m)": -1.8434139710073971,
+      "RF_y_error (m)": -3.7262390595160486,
+      "RF_z_error (m)": 1.102023523346245,
+      "RF_satclockerror (m)": -2.3752259599830947
+    }
+  },
+  {
+    "dataset": "DATA_MEO_Train.csv",
+    "orbit_type": "MEO",
+    "num_epochs": 90,
+    "date_start": "2025-09-01 14:00:00",
+    "date_end": "2025-09-07 16:00:00",
+    "lstm_pretrained": {
+      "x_error (m)": {
+        "mae": 0.26589239850643964,
+        "rmse": 0.4062144454709689,
+        "max_error": 1.3271964659616446,
+        "std_error": 0.39143568334457157,
+        "shapiro_w": 0.8475973155625268,
+        "shapiro_p_value": 0.009858659363486734,
+        "is_normal": false
+      },
+      "y_error (m)": {
+        "mae": 0.3232745802836686,
+        "rmse": 0.43810378747930095,
+        "max_error": 0.9995356283739157,
+        "std_error": 0.36926304624945366,
+        "shapiro_w": 0.9430808910051525,
+        "shapiro_p_value": 0.3565630034476545,
+        "is_normal": true
+      },
+      "z_error (m)": {
+        "mae": 0.5950050314227362,
+        "rmse": 0.6307614614537742,
+        "max_error": 1.0739162380233895,
+        "std_error": 0.5733711930325871,
+        "shapiro_w": 0.8502947301328636,
+        "shapiro_p_value": 0.010835851379878254,
+        "is_normal": false
+      },
+      "satclockerror (m)": {
+        "mae": 0.35672916130167365,
+        "rmse": 0.4578578068939078,
+        "max_error": 0.7829006375465462,
+        "std_error": 0.45411385889590955,
+        "shapiro_w": 0.9197339743201799,
+        "shapiro_p_value": 0.14615240075173325,
+        "is_normal": true
+      },
+      "3d_position_error_mean_m": 0.8244065655835834,
+      "3d_position_error_max_m": 1.3946978993614954,
+      "3d_position_error_rmse_m": 0.8687952149777854
+    },
+    "random_forest": {
+      "x_error (m)": {
+        "mae": 0.2885527372901877,
+        "rmse": 0.41949335117265335,
+        "max_error": 1.3269918908033675,
+        "std_error": 0.41109771742654444,
+        "shapiro_w": 0.8041473717796519,
+        "shapiro_p_value": 0.0023137051042406765,
+        "is_normal": false
+      },
+      "y_error (m)": {
+        "mae": 0.29485905119037253,
+        "rmse": 0.3885033851103519,
+        "max_error": 0.6942381167485652,
+        "std_error": 0.34026098487270906,
+        "shapiro_w": 0.9300231248662155,
+        "shapiro_p_value": 0.21783701052913684,
+        "is_normal": true
+      },
+      "z_error (m)": {
+        "mae": 0.5528812907864457,
+        "rmse": 0.6214604174178019,
+        "max_error": 1.0083259271884204,
+        "std_error": 0.5834907531111412,
+        "shapiro_w": 0.8616593028061478,
+        "shapiro_p_value": 0.01623252594150761,
+        "is_normal": false
+      },
+      "satclockerror (m)": {
+        "mae": 0.3494907469231762,
+        "rmse": 0.46657737041254793,
+        "max_error": 0.8990486170885523,
+        "std_error": 0.42608549709091503,
+        "shapiro_w": 0.9153887131911315,
+        "shapiro_p_value": 0.1233886208567126,
+        "is_normal": true
+      },
+      "3d_position_error_mean_m": 0.7991086107278098,
+      "3d_position_error_max_m": 1.498493610822073,
+      "3d_position_error_rmse_m": 0.8444658680712761
+    },
+    "day_8_forecast": {
+      "LSTM_x_error (m)": -0.545221093060209,
+      "LSTM_y_error (m)": 0.28703492518000195,
+      "LSTM_z_error (m)": -0.01975496256264511,
+      "LSTM_satclockerror (m)": 0.059529803327156613,
+      "RF_x_error (m)": -0.5982519241717816,
+      "RF_y_error (m)": -0.10919223914100887,
+      "RF_z_error (m)": 0.022155572458782788,
+      "RF_satclockerror (m)": 0.16249676699783974
+    }
+  },
+  {
+    "dataset": "DATA_MEO_Train2.csv",
+    "orbit_type": "MEO",
+    "num_epochs": 244,
+    "date_start": "2025-09-03 10:11:00",
+    "date_end": "2025-09-09 11:41:00",
+    "lstm_pretrained": {
+      "x_error (m)": {
+        "mae": 0.5577936801893402,
+        "rmse": 0.5640428646610683,
+        "max_error": 0.6563979647089838,
+        "std_error": 0.08372910793682393,
+        "shapiro_w": 0.6012322381047467,
+        "shapiro_p_value": 3.451973586813551e-10,
+        "is_normal": false
+      },
+      "y_error (m)": {
+        "mae": 0.5571273027892149,
+        "rmse": 0.5628454771938117,
+        "max_error": 0.9798608017041519,
+        "std_error": 0.08002624372257063,
+        "shapiro_w": 0.7286662548825505,
+        "shapiro_p_value": 4.418995552906237e-08,
+        "is_normal": false
+      },
+      "z_error (m)": {
+        "mae": 1.1757020729170369,
+        "rmse": 1.1837835703519444,
+        "max_error": 1.9467097196323873,
+        "std_error": 0.13808757067085756,
+        "shapiro_w": 0.6810181991110098,
+        "shapiro_p_value": 6.229574761847428e-09,
+        "is_normal": false
+      },
+      "satclockerror (m)": {
+        "mae": 0.22624738297968308,
+        "rmse": 0.22703964857468367,
+        "max_error": 0.2719654107300315,
+        "std_error": 0.018950559879868083,
+        "shapiro_w": 0.9611244703460392,
+        "shapiro_p_value": 0.11209911162502334,
+        "is_normal": true
+      },
+      "3d_position_error_mean_m": 1.4214838240345102,
+      "3d_position_error_max_m": 2.0754696966349155,
+      "3d_position_error_rmse_m": 1.4269838561833104
+    },
+    "random_forest": {
+      "x_error (m)": {
+        "mae": 0.08387447764256821,
+        "rmse": 0.102636955767253,
+        "max_error": 0.38884949243437744,
+        "std_error": 0.08267772767499627,
+        "shapiro_w": 0.6538564310102201,
+        "shapiro_p_value": 2.216356591799714e-09,
+        "is_normal": false
+      },
+      "y_error (m)": {
+        "mae": 0.08264128882519017,
+        "rmse": 0.11763192180195883,
+        "max_error": 0.4670051112124194,
+        "std_error": 0.11376303220420678,
+        "shapiro_w": 0.927003824115433,
+        "shapiro_p_value": 0.005296434658724095,
+        "is_normal": false
+      },
+      "z_error (m)": {
+        "mae": 0.06712949114542134,
+        "rmse": 0.1492718684784693,
+        "max_error": 0.9357912092629015,
+        "std_error": 0.14856677406518531,
+        "shapiro_w": 0.5056250185037818,
+        "shapiro_p_value": 1.730323605686796e-11,
+        "is_normal": false
+      },
+      "satclockerror (m)": {
+        "mae": 0.01042850136446557,
+        "rmse": 0.016436986160408718,
+        "max_error": 0.06917389640185712,
+        "std_error": 0.01618540073692701,
+        "shapiro_w": 0.8727378852286676,
+        "shapiro_p_value": 9.259766171950198e-05,
+        "is_normal": false
+      },
+      "3d_position_error_mean_m": 0.1576771527829711,
+      "3d_position_error_max_m": 1.0136841409943926,
+      "3d_position_error_rmse_m": 0.2159946843795437
+    },
+    "day_8_forecast": {
+      "LSTM_x_error (m)": -0.6602036436764022,
+      "LSTM_y_error (m)": 0.4693878122174906,
+      "LSTM_z_error (m)": -1.065211697202093,
+      "LSTM_satclockerror (m)": 0.22386942360691325,
+      "RF_x_error (m)": -0.08733995882107504,
+      "RF_y_error (m)": -0.10514427584992167,
+      "RF_z_error (m)": 0.0961316668785513,
+      "RF_satclockerror (m)": -0.020272315006407617
+    }
+  }
+]

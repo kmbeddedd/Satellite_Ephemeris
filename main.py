@@ -21,9 +21,9 @@ Examples:
     )
     parser.add_argument(
         "--model",
-        choices=["bilstm", "transformer", "tune", "audit", "baselines"],
+        choices=["bilstm", "transformer", "tune", "audit", "baselines", "orbitiq", "eval_orbitiq"],
         default="bilstm",
-        help="Pipeline: bilstm, transformer, tune, read-only data audit, or executable baselines"
+        help="Pipeline: bilstm, transformer, tune, audit, baselines, orbitiq (train end-to-end), or eval_orbitiq"
     )
 
     # Pass remaining arguments to the chosen pipeline
@@ -47,6 +47,12 @@ Examples:
     elif args.model == "baselines":
         from evaluate_baselines import main as run_baselines
         raise SystemExit(run_baselines())
+    elif args.model == "orbitiq":
+        from train_orbitiq_pipeline import main as run_orbitiq
+        run_orbitiq()
+    elif args.model == "eval_orbitiq":
+        from evaluate_orbitiq import main as run_eval_orbitiq
+        run_eval_orbitiq()
 
 
 if __name__ == "__main__":

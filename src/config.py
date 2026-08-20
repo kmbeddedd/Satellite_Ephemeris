@@ -7,6 +7,8 @@ import os
 # Default Paths
 DEFAULT_DATA_PATH = "data_acquisition/CLEAN_GNSS_BENCHMARK.csv"
 DEFAULT_OUTPUT_DIR = "./gnss_results"
+ORBITIQ_DATA_PATH = "data/orbitiq/ORBITIQ_ISRO_BENCHMARK.csv"
+ORBITIQ_OUTPUT_DIR = "./orbitiq_pipeline_results"
 
 # Temporal Specifications
 TRAIN_END_DATE = "2026-01-08 00:00:00"  # Day 1-7 Train, Day 8 Test
